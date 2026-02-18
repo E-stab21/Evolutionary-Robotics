@@ -2,3 +2,4 @@
 .idea
 *.urdf
 *.sdf
+data/
