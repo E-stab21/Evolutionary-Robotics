@@ -1,7 +1,7 @@
 import pybullet as p
 #personal imports
-from world import WORLD
-from robot import ROBOT
+from classes.world import WORLD
+from classes.robot import ROBOT
 
 class SIMULATION:
     def __init__(self):

@@ -2,8 +2,8 @@ from pyrosim import pyrosim
 import pybullet as p
 #personal
 import generate
-from sensor import SENSOR
-from motor import MOTOR
+from classes.sensor import SENSOR
+from classes.motor import MOTOR
 
 class ROBOT:
     def __init__(self):

@@ -10,7 +10,7 @@ def Run():
         p.stepSimulation()
         simulation.robot.Sense(t)
         simulation.robot.Act(t)
-        time.sleep(1 / 100)
+        time.sleep(1/50)
 
 if __name__ == "__main__":
     Run()
