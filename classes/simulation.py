@@ -11,7 +11,7 @@ class SIMULATION:
         self.robot = ROBOT()
 
     def Run(self):
-        for t in range(1000):
+        for t in range(400):
             p.stepSimulation()
             self.robot.Sense(t)
             self.robot.Think()
