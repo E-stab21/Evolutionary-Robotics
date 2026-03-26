@@ -5,8 +5,15 @@ from classes.world import WORLD
 from classes.robot import ROBOT
 
 class SIMULATION:
-    def __init__(self):
-        #feilds
+    def __init__(self, directOrGUI):
+        if directOrGUI == "GUI":
+            self.gui = True
+            p.connect(p.GUI)
+        elif directOrGUI == "DIRECT":
+            self.gui = False
+            p.connect(p.DIRECT)
+
+        #fields
         self.world = WORLD()
         self.robot = ROBOT()
 
@@ -16,7 +23,14 @@ class SIMULATION:
             self.robot.Sense(t)
             self.robot.Think()
             self.robot.Act()
-            time.sleep(1 / 100)
+            if self.gui:
+                time.sleep(1 / 100)
+            else:
+                time.sleep(1 / 500)
+        self.Get_Fitness()
+
+    def Get_Fitness(self):
+        self.robot.Get_Fitness()
 
     def __del__(self):
         p.disconnect()
