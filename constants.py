@@ -1,6 +1,7 @@
 import numpy
 
 numberOfGenerations = 10
+populationSize = 10
 
 amplitudeB = numpy.pi / 6
 frequencyB = 4

@@ -1,11 +1,11 @@
-import pybullet as p
 import time
+import pybullet as p
 #personal imports
 from classes.world import WORLD
 from classes.robot import ROBOT
 
 class SIMULATION:
-    def __init__(self, directOrGUI):
+    def __init__(self, directOrGUI, solutionID):
         if directOrGUI == "GUI":
             self.gui = True
             p.connect(p.GUI)
@@ -15,10 +15,10 @@ class SIMULATION:
 
         #fields
         self.world = WORLD()
-        self.robot = ROBOT()
+        self.robot = ROBOT(solutionID)
 
     def Run(self):
-        for t in range(400):
+        for t in range(1000):
             p.stepSimulation()
             self.robot.Sense(t)
             self.robot.Think()
@@ -26,7 +26,8 @@ class SIMULATION:
             if self.gui:
                 time.sleep(1 / 100)
             else:
-                time.sleep(1 / 500)
+                pass
+                #time.sleep(1 / 500)
         self.Get_Fitness()
 
     def Get_Fitness(self):
