@@ -1,4 +1,3 @@
-import numpy
 from pyrosim import pyrosim
 import pybullet as p
 #personal

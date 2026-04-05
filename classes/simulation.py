@@ -1,8 +1,8 @@
-import time
 import pybullet as p
+import pybullet_data
 #personal imports
-from classes.world import WORLD
 from classes.robot import ROBOT
+import time
 
 class SIMULATION:
     def __init__(self, directOrGUI, solutionID):
@@ -13,8 +13,13 @@ class SIMULATION:
             self.gui = False
             p.connect(p.DIRECT)
 
-        #fields
-        self.world = WORLD()
+        #world
+        p.setAdditionalSearchPath(pybullet_data.getDataPath())
+        p.setGravity(0, 0, -9.8)
+        p.loadSDF("world.sdf")
+        p.loadURDF("plane.urdf")
+
+        #body
         self.robot = ROBOT(solutionID)
 
     def Run(self):
@@ -25,12 +30,6 @@ class SIMULATION:
             self.robot.Act()
             if self.gui:
                 time.sleep(1 / 100)
-            else:
-                pass
-                #time.sleep(1 / 500)
-        self.Get_Fitness()
-
-    def Get_Fitness(self):
         self.robot.Get_Fitness()
 
     def __del__(self):

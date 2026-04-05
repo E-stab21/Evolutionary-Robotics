@@ -1,17 +1,16 @@
-from pyrosim import pyrosim
 import pybullet as p
+from pyrosim import pyrosim
 from pyrosim.neuralNetwork import NEURAL_NETWORK
+import os
 #personal
-import generate
 from classes.sensor import SENSOR
 from classes.motor import MOTOR
-import os
 import constants as c
 
 class ROBOT:
-    def __init__(self, solutionID):
+    def __init__(self, design):
         #feilds
-        self.solID = solutionID
+        self.desId = design.id
         self.motors = {}
         self.sensors = {}
         self.id = None
@@ -19,25 +18,23 @@ class ROBOT:
         #body
         self.id = p.loadURDF("../body.urdf")
         pyrosim.Prepare_To_Simulate(self.id)
-        self.Prepare_To_Sense()
-        self.Prepare_To_Act()
-
-        #brain
-        self.nn = NEURAL_NETWORK("brain" + str(solutionID) + ".nndf")
-
-        os.system("del brain" + str(solutionID) + ".nndf")
-
-    def Prepare_To_Sense(self):
+        #prep for sense
         for linkName in pyrosim.linkNamesToIndices:
             self.sensors[linkName] = SENSOR(linkName)
+        #prep for act
+        for jointName in pyrosim.jointNamesToIndices:
+            self.motors[jointName] = MOTOR(jointName)
+
+        #brain
+        if design.isCTRN:
+
+        else:
+            self.nn = NEURAL_NETWORK("brain" + str(design.id) + ".nndf")
+            os.system("del brain" + str(design.id) + ".nndf")
 
     def Sense(self, t):
         for sensor in self.sensors.values():
             sensor.Get_Value(t)
-
-    def Prepare_To_Act(self):
-        for jointName in pyrosim.jointNamesToIndices:
-            self.motors[jointName] = MOTOR(jointName)
 
     def Act(self):
         for neuronName in self.nn.Get_Neuron_Names():
@@ -50,9 +47,9 @@ class ROBOT:
         self.nn.Update()
 
     def Get_Fitness(self):
-        stateOfLinkZero = p.getLinkState(self.id, 0)
-        positionOfLinkZero = stateOfLinkZero[0]
-        xCoordinateOfLinkZero = positionOfLinkZero[0]
-        with open(f"tmp{self.solID}.txt", "w") as f:
-            f.write(str(xCoordinateOfLinkZero))
-        os.rename("tmp" + str(self.solID) + ".txt", "fitness" + str(self.solID) + ".txt")
+        basePositionAndOrientation = p.getBasePositionAndOrientation(self.robot)
+        basePosition = basePositionAndOrientation[0]
+        xPosition = basePosition[0]
+        with open(f"tmp{self.desId}.txt", "w") as f:
+            f.write(str(xPosition))
+        os.rename("tmp" + str(self.desId) + ".txt", "fitness" + str(self.desId) + ".txt")

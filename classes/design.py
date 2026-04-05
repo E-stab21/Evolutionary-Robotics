@@ -5,9 +5,9 @@ import os
 import time
 import constants as c
 
-class SOLUTION:
-    def __init__(self, ID):
-        self.myID = ID
+class DESIGN:
+    def __init__(self, Id):
+        self.myID = Id
         self.weights = np.random.rand(c.numSensorNeurons, c.numMotorNeurons) * 2 - 1
         self.fitness = None
 

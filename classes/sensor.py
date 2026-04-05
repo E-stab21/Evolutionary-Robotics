@@ -5,11 +5,6 @@ from pyrosim import pyrosim
 class SENSOR:
     def __init__(self, name):
         self.linkName = name
-        self.sensorValues = None
-
-        self.Prepare_To_Sense()
-
-    def Prepare_To_Sense(self):
         self.sensorValues = numpy.zeros(1000)
 
     def Get_Value(self, t):

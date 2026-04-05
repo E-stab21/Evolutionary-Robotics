@@ -1,6 +1,6 @@
 import random
 
-from solution import SOLUTION
+from design import SOLUTION
 import constants
 import copy
 
