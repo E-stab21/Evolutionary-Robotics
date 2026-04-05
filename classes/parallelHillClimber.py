@@ -1,8 +1,7 @@
 import random
 import time
 from cmath import inf
-
-from solution import SOLUTION
+from classes.solution import SOLUTION
 import constants as c
 import copy
 import os
@@ -17,7 +16,6 @@ class PARALLEL_HILL_CLIMBER:
         for index in range(c.populationSize):
             self.parents[index] = SOLUTION(self.nextAvailableID)
             self.nextAvailableID += 1
-        self.child = None
 
 
     def Evolve(self):
@@ -52,7 +50,6 @@ class PARALLEL_HILL_CLIMBER:
         print()
         for key in self.parents.keys():
             print(f"{self.parents[key].fitness:.2f} | {self.children[key].fitness:.2f}")
-        time.sleep(2)
         print()
 
     def Show_Best(self):
