@@ -1,36 +1,34 @@
-import numpy as np
 from pyrosim import pyrosim
+import numpy as np
+import pickle
+import subprocess
 import random
 import os
-import time
-import constants as c
 
-class DESIGN:
-    def __init__(self, Id):
-        self.myID = Id
-        self.weights = np.random.rand(c.numSensorNeurons, c.numMotorNeurons) * 2 - 1
+class Design:
+    def __init__(self, id_):
+        self.id = id_
+        self.body_file = "dfs/quadruped.urdf"
+        self.num_of_sensor_neurons = 9
+        self.num_of_motor_neurons = 8
+        self.process = None
         self.fitness = None
 
-    def Evaluate(self, directOrGUI):
-        self.Start_Simulation(directOrGUI)
-        self.Wait_For_Simulation_To_End()
+    def set_id(self, id_):
+        self.id = id_
 
-    def Mutate(self):
-        randomRow = random.randint(0, 2)
-        randomColumn = random.randint(0, 1)
-        self.weights[randomRow][randomColumn] = random.random() * 2 - 1
+    def wait(self):
+        if self.process:
+            self.process.wait()
+            self.process = None
+            with open(f"fitness{self.id}.txt", "r", encoding="utf-8") as f:
+                self.fitness = float(f.read())
+            os.remove(f"fitness{self.id}.txt")
+        else:
+            print("no process to wait on")
 
-    def Create_World(self):
-        pyrosim.Start_SDF("../world.sdf")
-        pyrosim.Send_Cube(name="Box", pos=[5, 0, 0.5], size=[1, 1, 1])
-        pyrosim.End()
-
-    def Create_Robot(self):
-        self.Generate_Body()
-        self.Generate_Brain()
-
-    def Generate_Body(self):
-        pyrosim.Start_URDF("../body.urdf")
+    def generate_body(self):
+        pyrosim.Start_URDF(self.body_file)
         #torso
         pyrosim.Send_Cube(name="Torso", pos=[0, 0, 1], size=[1, 1, 1])
         #frontleg
@@ -63,10 +61,48 @@ class DESIGN:
         pyrosim.Send_Cube(name="RightFoot", pos=[0.5, 0, 0], size=[1, 0.2, 0.2])
         pyrosim.End()
 
+class Ctrnn(Design):
+    def __init__(self, id_):
+        super().__init__(id_)
+        self.n = 30
+        self.time_constant = 1
+        self.sensor_neurons = list(range(self.n))[:self.num_of_sensor_neurons]
+        self.motor_neurons = list(range(self.n))[-self.num_of_motor_neurons:]
+        self.weights = (np.random.rand(self.n, self.n) * 2) - 1
+        self.bias = (np.random.rand(self.n) * 2) - 1
+        self.vfunc = np.vectorize(np.tanh)
 
-    def Generate_Brain(self):
+    def simulate(self, direct_or_gui="DIRECT"):
+        self.generate_body()
+        with open(f"brain{self.id}.pkl", "wb") as f:
+            pickle.dump(self, f)
+        self.process = subprocess.Popen(["python", "simulation.py", direct_or_gui, str(self.id),
+                                         self.body_file, f"brain{self.id}.pkl"])
+
+    def mutate(self):
+        randomRow = random.randint(0, 2)
+        randomColumn = random.randint(0, 1)
+        self.weights[randomRow][randomColumn] = random.random() * 2 - 1
+
+class TrdNet(Design):
+    def __init__(self, id_):
+        super().__init__(id_)
+        self.weights = np.random.rand(self.num_of_sensor_neurons, self.num_of_motor_neurons) * 2 - 1
+
+    def simulate(self, direct_or_gui="DIRECT"):
+        self.generate_body()
+        self.generate_brain()
+        self.process = subprocess.Popen(["python", "simulation.py", direct_or_gui, str(self.id),
+                                         self.body_file, f"brain{self.id}.nndf"])
+
+    def mutate(self):
+        randomRow = random.randint(0, 2)
+        randomColumn = random.randint(0, 1)
+        self.weights[randomRow][randomColumn] = random.random() * 2 - 1
+
+    def generate_brain(self):
         #sensor neurons
-        pyrosim.Start_NeuralNetwork("brain" + str(self.myID) + ".nndf")
+        pyrosim.Start_NeuralNetwork(f"brain{self.id}.nndf")
         pyrosim.Send_Sensor_Neuron(name=0, linkName="Torso")
         pyrosim.Send_Sensor_Neuron(name=1, linkName="FrontLeg")
         pyrosim.Send_Sensor_Neuron(name=2, linkName="BackLeg")
@@ -88,24 +124,9 @@ class DESIGN:
         pyrosim.Send_Motor_Neuron(name=16, jointName="RightLeg_RightFoot")
 
         #synapses
-        for currentRow in range(c.numSensorNeurons):
-            for currentColumn in range(c.numMotorNeurons):
+        for currentRow in range(self.num_of_sensor_neurons):
+            for currentColumn in range(self.num_of_motor_neurons):
                 pyrosim.Send_Synapse(sourceNeuronName=currentRow,
-                                     targetNeuronName=currentColumn + c.numSensorNeurons,
+                                     targetNeuronName=currentColumn + self.num_of_sensor_neurons,
                                      weight=self.weights[currentRow][currentColumn])
         pyrosim.End()
-
-    def Set_ID(self, id):
-        self.myID = id
-
-    def Start_Simulation(self, directOrGUI):
-        self.Create_World()
-        self.Create_Robot()
-        os.system(f"start /B python simulate.py {directOrGUI} {str(self.myID)}")
-
-    def Wait_For_Simulation_To_End(self):
-        while not os.path.exists(f"fitness{str(self.myID)}.txt"):
-            time.sleep(0.01)
-        with open(f"fitness{str(self.myID)}.txt") as f:
-            self.fitness = float(f.read())
-        os.system(f"del fitness{str(self.myID)}.txt")
