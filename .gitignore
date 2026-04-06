@@ -4,3 +4,4 @@
 *.sdf
 *.nndf
 data/
+__pycache__
