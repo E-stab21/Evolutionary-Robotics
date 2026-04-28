@@ -1,7 +1,5 @@
-import random
-import time
 from cmath import inf
-from classes.design import SOLUTION
+from src.classes.design import SOLUTION
 import constants as c
 import copy
 import os

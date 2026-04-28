@@ -1,5 +1,6 @@
 .venv/
 .idea/
+.vscode/
 *.urdf
 *.sdf
 *.nndf

@@ -1,10 +1,11 @@
 import numpy as np
-from simulation import Simulation
+from src.simulation import Simulation
 
-class TEST_DESIGN:
-    def __init__(self):
+class TestDesign:
+    def __init__(self, is_euler):
         self.id = 2
-        self.isCTRN = True
+        self.is_ctrnn = True
+        self.is_euler = is_euler
         self.n = 10
 
         #brain
@@ -20,7 +21,7 @@ class TEST_DESIGN:
 
 if __name__ == "__main__":
     #solutionID = sys.argv[2]
-
-    design = TEST_DESIGN()
-    sim = Simulation("GUI", design)
+    euler = TestDesign(True)
+    rk4 = TestDesign(False)
+    sim = Simulation("DIRECT", "dfs/quadruped.urdf", "")
     sim.run()

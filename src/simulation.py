@@ -2,16 +2,16 @@ import pybullet as p
 import pybullet_data
 import sys
 import time
-from classes.robot import Robot
+from src.classes.robot import Robot
 
 class Simulation:
-    def __init__(self, direct_or_gui, design_id, body_file, brain_file):
+    def __init__(self, direct_or_gui, fitness_id, body_file, brain_file):
         if direct_or_gui == "GUI":
             self.gui = True
-            p.connect(p.GUI)
+            p.connect(p.GUI, options="--width=1220 --height=1080")
         elif direct_or_gui == "DIRECT":
             self.gui = False
-            p.connect(p.DIRECT)
+            p.connect(p.DIRECT, options="--width=1220 --height=1080")
 
         #world
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
@@ -20,7 +20,7 @@ class Simulation:
         p.loadURDF("plane.urdf")
 
         #body
-        self.robot = Robot(design_id, body_file, brain_file)
+        self.robot = Robot(fitness_id, body_file, brain_file)
 
     def run(self):
         for t in range(1000):

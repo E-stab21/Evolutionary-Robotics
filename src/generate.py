@@ -2,7 +2,7 @@ from pyrosim import pyrosim
 import random
 
 def Create_World():
-    pyrosim.Start_SDF("dfs/world.sdf")
+    pyrosim.Start_SDF("../dfs/world.sdf")
     pyrosim.Send_Cube(name="Box", pos=[5,0,0.5], size=[1,1,1])
     pyrosim.End()
 

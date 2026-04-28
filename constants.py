@@ -1,5 +1,9 @@
-numberOfGenerations = 10
-populationSize = 10
-motorJointRange = 0.7
+#experiment parameters
+NUMBER_OF_TRIALS = 2
+POPULATION_SIZE = 10
+NUMBER_OF_GENERATIONS = 30
 
-deltaTime = 0.5
+#simulation parameters
+LOWER_JOINT_LIMIT = -1.0
+UPPER_JOINT_LIMIT = 1.0
+DELTA_TIME = 0.5

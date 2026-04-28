@@ -1,21 +1,21 @@
-from pyrosim import pyrosim
-import numpy as np
 import pickle
 import subprocess
 import random
 import os
+import numpy as np
+from pyrosim import pyrosim
 
 class Design:
-    def __init__(self, id_):
-        self.id = id_
+    next_id = 0
+
+    def __init__(self):
+        self.id = Design.next_id
+        Design.next_id += 1
         self.body_file = "dfs/quadruped.urdf"
         self.num_of_sensor_neurons = 9
         self.num_of_motor_neurons = 8
         self.process = None
         self.fitness = None
-
-    def set_id(self, id_):
-        self.id = id_
 
     def wait(self):
         if self.process:
@@ -26,6 +26,13 @@ class Design:
             os.remove(f"fitness{self.id}.txt")
         else:
             print("no process to wait on")
+    
+    def __lt__(self, other):
+        return (
+            self.fitness > other.fitness
+            and self.fitness is not None
+            and other.fitness is not None
+        )
 
     def generate_body(self):
         pyrosim.Start_URDF(self.body_file)
@@ -37,34 +44,36 @@ class Design:
         pyrosim.Send_Cube(name="FrontLeg", pos=[0, 0.5, 0], size=[0.2, 1, 0.2])
         pyrosim.Send_Joint(name="FrontLeg_FrontFoot", parent="FrontLeg", child="FrontFoot", type="revolute",
                            position=[0, 1, 0], jointAxis="1 0 0")
-        pyrosim.Send_Cube(name="FrontFoot", pos=[0, 0.5, 0], size=[0.2, 1, 0.2])
+        pyrosim.Send_Cube(name="FrontFoot", pos=[0, 0, -0.5], size=[0.2, 0.2, 1])
         #backleg
         pyrosim.Send_Joint(name="Torso_BackLeg", parent="Torso", child="BackLeg", type="revolute",
                            position=[0, -0.5, 1], jointAxis="1 0 0")
         pyrosim.Send_Cube(name="BackLeg", pos=[0, -0.5, 0], size=[0.2, 1, 0.2])
         pyrosim.Send_Joint(name="BackLeg_BackFoot", parent="BackLeg", child="BackFoot", type="revolute",
                            position=[0, -1, 0], jointAxis="1 0 0")
-        pyrosim.Send_Cube(name="BackFoot", pos=[0, -0.5, 0], size=[0.2, 1, 0.2])
+        pyrosim.Send_Cube(name="BackFoot", pos=[0, 0, -0.5], size=[0.2, 0.2, 1])
         #leftleg
         pyrosim.Send_Joint(name="Torso_LeftLeg", parent="Torso", child="LeftLeg", type="revolute",
                            position=[-0.5, 0, 1], jointAxis="0 1 0")
         pyrosim.Send_Cube(name="LeftLeg", pos=[-0.5, 0, 0], size=[1, 0.2, 0.2])
         pyrosim.Send_Joint(name="LeftLeg_LeftFoot", parent="LeftLeg", child="LeftFoot", type="revolute",
                            position=[-1, 0, 0], jointAxis="0 1 0")
-        pyrosim.Send_Cube(name="LeftFoot", pos=[-0.5, 0, 0], size=[1, 0.2, 0.2])
+        pyrosim.Send_Cube(name="LeftFoot", pos=[0, 0, -0.5], size=[0.2, 0.2, 1])
         #rightleg
         pyrosim.Send_Joint(name="Torso_RightLeg", parent="Torso", child="RightLeg", type="revolute",
                            position=[0.5, 0, 1], jointAxis="0 1 0")
         pyrosim.Send_Cube(name="RightLeg", pos=[0.5, 0, 0], size=[1, 0.2, 0.2])
         pyrosim.Send_Joint(name="RightLeg_RightFoot", parent="RightLeg", child="RightFoot", type="revolute",
                            position=[1, 0, 0], jointAxis="0 1 0")
-        pyrosim.Send_Cube(name="RightFoot", pos=[0.5, 0, 0], size=[1, 0.2, 0.2])
+        pyrosim.Send_Cube(name="RightFoot", pos=[0, 0, -0.5], size=[0.2, 0.2, 1])
         pyrosim.End()
 
 class Ctrnn(Design):
-    def __init__(self, id_):
-        super().__init__(id_)
-        self.n = 30
+    def __init__(self, is_euler):
+        super().__init__()
+        self.brain_file = f"dfs/brain{self.id}.pkl"
+        self.is_euler = is_euler
+        self.n = 20
         self.time_constant = 1
         self.sensor_neurons = list(range(self.n))[:self.num_of_sensor_neurons]
         self.motor_neurons = list(range(self.n))[-self.num_of_motor_neurons:]
@@ -74,35 +83,53 @@ class Ctrnn(Design):
 
     def simulate(self, direct_or_gui="DIRECT"):
         self.generate_body()
-        with open(f"brain{self.id}.pkl", "wb") as f:
+        with open(self.brain_file, "wb") as f:
             pickle.dump(self, f)
-        self.process = subprocess.Popen(["python", "simulation.py", direct_or_gui, str(self.id),
-                                         self.body_file, f"brain{self.id}.pkl"])
+        self.process = (
+            subprocess.Popen(["python", "src/simulation.py", direct_or_gui,
+            str(self.id), self.body_file, self.brain_file])
+        )
 
     def mutate(self):
-        randomRow = random.randint(0, 2)
-        randomColumn = random.randint(0, 1)
-        self.weights[randomRow][randomColumn] = random.random() * 2 - 1
+        random_row = random.randint(0, self.n - 1)
+        random_column = random.randint(0, self.n - 1)
+        random_bias = random.randint(0, self.n - 1)
+        self.weights[random_row][random_column] = random.random() * 2 - 1
+        self.bias[random_bias] = random.random() * 2 - 1
+
+    def spawn(self):
+        child = Ctrnn(self.is_euler)
+        child.weights = self.weights.copy()
+        child.bias = self.bias.copy()
+        child.mutate()
+        return child
 
 class TrdNet(Design):
-    def __init__(self, id_):
-        super().__init__(id_)
+    def __init__(self):
+        super().__init__()
+        self.brain_file = f"dfs/brain{self.id}.nndf"
         self.weights = np.random.rand(self.num_of_sensor_neurons, self.num_of_motor_neurons) * 2 - 1
 
     def simulate(self, direct_or_gui="DIRECT"):
         self.generate_body()
         self.generate_brain()
-        self.process = subprocess.Popen(["python", "simulation.py", direct_or_gui, str(self.id),
-                                         self.body_file, f"brain{self.id}.nndf"])
+        self.process = subprocess.Popen(["python", "src/simulation.py", direct_or_gui, str(self.id),
+                                         self.body_file, self.brain_file])
 
     def mutate(self):
-        randomRow = random.randint(0, 2)
-        randomColumn = random.randint(0, 1)
-        self.weights[randomRow][randomColumn] = random.random() * 2 - 1
+        random_row = random.randint(0, self.num_of_sensor_neurons - 1)
+        random_column = random.randint(0, self.num_of_motor_neurons - 1)
+        self.weights[random_row][random_column] = random.random() * 2 - 1
+
+    def spawn(self):
+        child = TrdNet()
+        child.weights = self.weights.copy()
+        child.mutate()
+        return child
 
     def generate_brain(self):
         #sensor neurons
-        pyrosim.Start_NeuralNetwork(f"brain{self.id}.nndf")
+        pyrosim.Start_NeuralNetwork(self.brain_file)
         pyrosim.Send_Sensor_Neuron(name=0, linkName="Torso")
         pyrosim.Send_Sensor_Neuron(name=1, linkName="FrontLeg")
         pyrosim.Send_Sensor_Neuron(name=2, linkName="BackLeg")
