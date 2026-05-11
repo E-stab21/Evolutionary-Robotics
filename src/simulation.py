@@ -23,13 +23,12 @@ class Simulation:
         self.robot = Robot(fitness_id, body_file, brain_file)
 
     def run(self):
-        for t in range(1000):
+        for t in range(2500):
             p.stepSimulation()
             self.robot.sense()
             self.robot.act()
             if self.gui:
                 time.sleep(1 / 100)
-        self.robot.write_fitness()
 
     def __del__(self):
         p.disconnect()
@@ -38,7 +37,6 @@ if __name__ == "__main__":
     #run sim
     sim = Simulation(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])
     sim.run()
-
-
-
-
+    print()
+    print(sim.robot.write_fitness())
+    

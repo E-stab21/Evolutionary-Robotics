@@ -1,9 +1,9 @@
 import pickle
 import subprocess
 import random
-import os
 import numpy as np
 from pyrosim import pyrosim
+
 
 class Design:
     next_id = 0
@@ -19,11 +19,15 @@ class Design:
 
     def wait(self):
         if self.process:
-            self.process.wait()
+            stdout, stderr = self.process.communicate()
             self.process = None
-            with open(f"fitness{self.id}.txt", "r", encoding="utf-8") as f:
-                self.fitness = float(f.read())
-            os.remove(f"fitness{self.id}.txt")
+            #with open(f"fitness{self.id}.txt", "r", encoding="utf-8") as f:
+            #    self.fitness = float(f.read())
+            try:
+                self.fitness = float(stdout.splitlines()[-1])
+            except ValueError:
+                self.fitness = 0
+                print(f"error: {stderr}")
         else:
             print("no process to wait on")
     
@@ -71,7 +75,7 @@ class Design:
 class Ctrnn(Design):
     def __init__(self, is_euler):
         super().__init__()
-        self.brain_file = f"dfs/brain{self.id}.pkl"
+        self.brain_file = f"brain{self.id}.pkl"
         self.is_euler = is_euler
         self.n = 20
         self.time_constant = 1
@@ -82,12 +86,14 @@ class Ctrnn(Design):
         self.vfunc = np.vectorize(np.tanh)
 
     def simulate(self, direct_or_gui="DIRECT"):
-        self.generate_body()
-        with open(self.brain_file, "wb") as f:
+        with open(f"dfs/{self.brain_file}", "wb") as f:
             pickle.dump(self, f)
         self.process = (
             subprocess.Popen(["python", "src/simulation.py", direct_or_gui,
-            str(self.id), self.body_file, self.brain_file])
+            str(self.id), self.body_file, f"dfs/{self.brain_file}"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True)
         )
 
     def mutate(self):
@@ -104,17 +110,25 @@ class Ctrnn(Design):
         child.mutate()
         return child
 
+    def save(self):
+        with open(f"best/{self.brain_file}", "wb") as f:
+            pickle.dump(self, f)
+
 class TrdNet(Design):
     def __init__(self):
         super().__init__()
-        self.brain_file = f"dfs/brain{self.id}.nndf"
+        self.brain_file = f"brain{self.id}.nndf"
         self.weights = np.random.rand(self.num_of_sensor_neurons, self.num_of_motor_neurons) * 2 - 1
 
     def simulate(self, direct_or_gui="DIRECT"):
-        self.generate_body()
-        self.generate_brain()
-        self.process = subprocess.Popen(["python", "src/simulation.py", direct_or_gui, str(self.id),
-                                         self.body_file, self.brain_file])
+        self.generate_brain("dfs/")
+        self.process = (
+            subprocess.Popen(["python", "src/simulation.py", direct_or_gui,
+            str(self.id), self.body_file, f"dfs/{self.brain_file}"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True)
+        )
 
     def mutate(self):
         random_row = random.randint(0, self.num_of_sensor_neurons - 1)
@@ -127,9 +141,12 @@ class TrdNet(Design):
         child.mutate()
         return child
 
-    def generate_brain(self):
+    def save(self):
+        self.generate_brain("best/")
+
+    def generate_brain(self, path):
         #sensor neurons
-        pyrosim.Start_NeuralNetwork(self.brain_file)
+        pyrosim.Start_NeuralNetwork(f"{path}{self.brain_file}")
         pyrosim.Send_Sensor_Neuron(name=0, linkName="Torso")
         pyrosim.Send_Sensor_Neuron(name=1, linkName="FrontLeg")
         pyrosim.Send_Sensor_Neuron(name=2, linkName="BackLeg")

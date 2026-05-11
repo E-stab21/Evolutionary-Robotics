@@ -2,26 +2,23 @@
 Experiment for the CS3060 project.
 """
 import os
+import glob
 import matplotlib.pyplot as plt
 from pyrosim import pyrosim
 from src.classes.design import Ctrnn, TrdNet
 import constants as c
 
-
 def create_world():
     pyrosim.Start_SDF("dfs/world.sdf")
     pyrosim.End()
 
-def test(show_best=False):
+def run_trial():
     trd_population = []
     euler_population = []
     rtk4_population = []
     trd_fitnesses = []
     euler_fitnesses = []
     rtk4_fitnesses = []
-
-    #create the world
-    create_world()
 
     #create populations
     for _ in range(c.POPULATION_SIZE):
@@ -31,6 +28,7 @@ def test(show_best=False):
 
     #evolve
     for _ in range(c.NUMBER_OF_GENERATIONS):
+        print(f"Generation {_}")
 
         #simulating
         for index in range(c.POPULATION_SIZE):
@@ -41,6 +39,14 @@ def test(show_best=False):
             trd_population[index].wait()
             euler_population[index].wait()
             rtk4_population[index].wait()
+
+        #clean up
+        files_ = glob.glob("dfs/brain*.nndf")
+        for file_ in files_:
+            os.remove(file_)
+        files_ = glob.glob("dfs/brain*.pkl")
+        for file_ in files_:
+            os.remove(file_)
 
         #sort populations
         trd_population.sort()
@@ -63,37 +69,60 @@ def test(show_best=False):
         euler_fitnesses.append(euler_population[0].fitness)
         rtk4_fitnesses.append(rtk4_population[0].fitness)
 
-    #show best
-    if show_best:
-        trd_population[0].simulate(direct_or_gui="GUI")
-        trd_population[0].wait()
-        euler_population[0].simulate(direct_or_gui="GUI")
-        euler_population[0].wait()
-        rtk4_population[0].simulate(direct_or_gui="GUI")
-        rtk4_population[0].wait()
-
-    #cleanup
-    if os.path.exists("fitness*.txt"):
-        os.remove("fitness*.txt")
-
-    return trd_fitnesses, euler_fitnesses, rtk4_fitnesses
+    return ((trd_fitnesses, euler_fitnesses, rtk4_fitnesses),
+            (trd_population[0], euler_population[0], rtk4_population[0]))
 
 if __name__ == "__main__":
     trd_trials = []
     euler_trials = []
     rtk4_trials = []
+    trd_best = []
+    euler_best = []
+    rtk4_best = []
 
-    for _ in range(c.NUMBER_OF_TRIALS):
-        test_fitnesses = test()
-        trd_trials.append(test_fitnesses[0])
-        euler_trials.append(test_fitnesses[1])
-        rtk4_trials.append(test_fitnesses[2])
+    # create the world
+    create_world()
 
+    #cleanup
+    files = glob.glob("dfs/brain*.nndf")
+    for file in files:
+        os.remove(file)
+    files = glob.glob("dfs/brain*.pkl")
+    for file in files:
+        os.remove(file)
+
+    for trial in range(c.NUMBER_OF_TRIALS):
+        (trd_trail_fitness, euler_trail_fitness, rtk4_trail_fitness), \
+        (trd_trail_best, euler_trail_best, rtk4_trail_best) = run_trial()
+        trd_trials.append(trd_trail_fitness)
+        euler_trials.append(euler_trail_fitness)
+        rtk4_trials.append(rtk4_trail_fitness)
+        trd_best.append(trd_trail_best)
+        euler_best.append(euler_trail_best)
+        rtk4_best.append(rtk4_trail_best)
+        print(f"Trail {trial + 1} done")
+
+    #saving the best over all the trails
+    trd_best_overall = trd_best[0]
+    euler_best_overall = euler_best[0]
+    rtk4_best_overall = rtk4_best[0]
+    for i in range(len(trd_best)):
+        if trd_best[i].fitness > trd_best_overall.fitness:
+            trd_best_overall = trd_best[i]
+        if euler_best[i].fitness > euler_best_overall.fitness:
+            euler_best_overall = euler_best[i]
+        if rtk4_best[i].fitness > rtk4_best_overall.fitness:
+            rtk4_best_overall = rtk4_best[i]
+    trd_best_overall.save()
+    euler_best_overall.save()
+    rtk4_best_overall.save()
+
+    #plotting
     for i in range(c.NUMBER_OF_TRIALS):
-        plt.plot(trd_trials[i], label=f"TRD Trial {i + 1}", linewidth=1)
-        plt.plot(euler_trials[i], label=f"EULER Trial {i + 1}", linewidth=2, linestyle="dashed")
-        plt.plot(rtk4_trials[i], label=f"RK4 Trial {i + 1}", linewidth=3, linestyle="dotted")
-    plt.legend()
+        plt.plot(trd_trials[i], label=f"TRD Trial {i + 1}", linewidth=1, color="red")
+        plt.plot(euler_trials[i], label=f"EULER Trial {i + 1}", linewidth=2, linestyle="dashed", color="blue")
+        plt.plot(rtk4_trials[i], label=f"RK4 Trial {i + 1}", linewidth=3, linestyle="dotted", color="green")
+    #plt.legend()
     plt.xlabel("Generation")
     plt.ylabel("Fitness")
-    plt.savefig("data/experiment.png")
+    plt.savefig("data/experiment_.png")

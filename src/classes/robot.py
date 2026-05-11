@@ -3,13 +3,20 @@ from pyrosim import pyrosim
 import pickle
 from pyrosim.neuralNetwork import NEURAL_NETWORK
 import numpy as np
-import os
 import constants as c
+import os.path
 
 class Robot:
     def __init__(self, fitness_id, body_file, brain_file):
         #fields
-        self.id = p.loadURDF(body_file)
+        check = True
+        while check:
+            try:
+                self.id = p.loadURDF(body_file)
+                check = False
+            except Exception:
+                print("could not load body")
+                check = True
         self.fitness_id = fitness_id
         self.sensors = []
         self.motors = []
@@ -17,13 +24,18 @@ class Robot:
         #brain logic
         if brain_file[-4:] == "nndf":
             self.is_ctrnn = False
-            self.nn = NEURAL_NETWORK(brain_file)
-            os.remove(brain_file)
+            check = True
+            while check:
+                try:
+                    self.nn = NEURAL_NETWORK(brain_file)
+                    check = False
+                except Exception:
+                    print("could not load brain")
+                    check = True
         else:
             self.is_ctrnn = True
             with open(brain_file, "rb") as f:
                 self.brain = pickle.load(f)
-            os.remove(brain_file)
             self.brain_state = np.zeros(self.brain.n)
 
         #set senors and motors
@@ -73,15 +85,15 @@ class Robot:
                         controlMode=p.POSITION_CONTROL,
                         targetPosition=desired_angle,
                         maxForce=50.0
-                    )
+                    )   
         else:
-            for i, jointName in enumerate(self.motors):
+            for i, joint_name in enumerate(self.motors):
                 desired_angle = (
                     max(c.LOWER_JOINT_LIMIT, min(self.brain_state[self.brain.motor_neurons[i]], c.UPPER_JOINT_LIMIT))
                 )
                 pyrosim.Set_Motor_For_Joint(
                     bodyIndex=self.id,
-                    jointName=jointName,
+                    jointName=joint_name,
                     controlMode=p.POSITION_CONTROL,
                     targetPosition=desired_angle,
                     maxForce=50.0
@@ -90,8 +102,9 @@ class Robot:
     def write_fitness(self):
         base_position_and_orientation = p.getBasePositionAndOrientation(self.id)
         base_position = base_position_and_orientation[0]
-        with open(f"fitness{self.fitness_id}.txt", "w") as f:
-            f.write(str(base_position[0] * -1))
+        #with open(f"fitness{self.fitness_id}.txt", encoding="utf-8", mode="w") as f:
+        #    f.write(str(base_position[0] * -1))
+        return base_position[0] * -1
 
     def f(self, y, inputs):
         return -y + self.brain.weights @ self.brain.vfunc(y + self.brain.bias) + inputs
