@@ -1,0 +1,24 @@
+---
+description: High-level overview, architecture, 
+and goals of the Evolutionary Robotics project
+alwaysApply: true
+---
+# Project Overview
+This project contains all the code for my Evolutionary Robotics expirements
+# Core Architecture
+- **Simulation Engine:** We use PyBullet and Taichi for 
+physics simulation.
+- **Key Directories:**
+- `src/classes/`: Contains core object 
+definitions (Robot, HillClimber, etc.)
+- `src/pybullet/`: Physics simulation 
+wrappers.
+- `src/taichi/`: High-performance computing 
+components.
+# Key Terminology
+- **Fitness:** The distance a robot travels in 
+the simulation.
+- **Genotype:** The underlying parameters 
+defining the robot (weights, lengths).
+- **Phenotype:** The physical manifestation of 
+the robot in the simulator.

@@ -1,0 +1,16 @@
+---
+description:
+Context and Rules & Standards and for working
+in taichi
+globs: src/taichi/**/*.py
+alwaysApply: false
+---
+# Taichi Module Context
+This section of the project uses taichi as the physics
+simulator. I am modeling robot made out of springs.
+# Taichi Goals
+Train a 2D spring based robot to move the left
+using taichi's differential simulation.
+# Taichi Rules & Standards
+- Use documention from the taichi website in your answers
+  if you need to.
