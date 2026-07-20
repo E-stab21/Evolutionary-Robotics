@@ -52,7 +52,7 @@ for id in range(NUM_OF_AGENTS):
                 random.randint(0, len(points) - 1),
                 0,
             ]
-            if rand_spring not in springs:
+            if rand_spring[0] != rand_spring[1] and rand_spring not in springs:
                 springs.append(rand_spring)
                 check = False
 

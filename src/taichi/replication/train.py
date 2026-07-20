@@ -6,17 +6,19 @@ import secrets
 
 # init
 SEED = secrets.randbits(31)
-ti.init(arch=ti.gpu, random_seed=464525965)  # secrets.randbits(31))
-gui = ti.GUI()
+ti.init(
+    arch=ti.gpu, random_seed=464525965, debug=True, unrolling_limit=0
+)  # secrets.randbits(31))
+gui = ti.GUI("Sim", res=600)
 
 
 # constants
-TIME_STEPS = 1000
-DT = 0.001
+TIME_STEPS = 2000
+DT = 0.005
 GRAVITY = ti.Vector([0, -9.8])
 SPRING_K = 2500.0
 SPRING_DAMPING = 10.0
-MOTOR_FORCE = 170
+MOTOR_FORCE = 100
 
 GROUND_K = 8000.0
 GROUND_DAMPING = 150.0
@@ -30,6 +32,8 @@ CPG_FREQUENCY = 20.0
 LR = 0.01
 GRAD_CLIP = 10.0
 GENERATIONS = 20
+
+SCALE = 10.0
 
 
 @ti.kernel
@@ -163,7 +167,7 @@ def update_weights():
 
 
 # python functions
-def reading_in_agent():
+def read_in_agent():
     # reading in the file
     with open(f"agents/agent{id}.csv", "r") as f:
         data = csv.reader(f)
@@ -174,23 +178,9 @@ def reading_in_agent():
                 state += 1
                 continue
 
-            # cleaning and checking
-            # flag = False
-            # for i, e in enumerate(row):
-            #     try:
-            #         row[i] = float(e.strip())
-            #     except ValueError:
-            #         print(f"{i}: {e}")
-            #         state += 1
-            #         flag = True
-            #         continue
-            # if flag:
-            #     continue
-
             try:
                 row = [float(i.strip()) for i in row]
             except ValueError:
-                print(row[0])
                 state += 1
                 continue
 
@@ -210,9 +200,42 @@ def reading_in_agent():
 
     # offsetting grid
     for i in range(len(points)):
-        x, y = points[i]
-        if x == 2 or x == 4:
+        if points[i][1] == 2.0 or points[i][1] == 4.0:
             points[i][0] += 0.5
+
+
+def overwriting_weights(n, m, weights, lines, line_i):
+    for i in range(n):
+        temp = []
+        for j in range(m):
+            temp.append(str(weights[i, j]))
+        lines[line_i + i] = temp
+
+
+def writing_out_agent():
+    lines = None
+    with open(f"agents/agent{id}.csv", "r") as f:
+        lines = list(csv.reader(f))
+        state = 0
+        for line_i in range(len(lines)):
+            if lines[line_i][:-1] == "Matrix":
+                state += 1
+
+            if state == 1:
+                overwriting_weights(
+                    MIDDLE_LAYER_SIZE, NUM_OF_INPUTS, weights1, lines, line_i
+                )
+            if state == 2:
+                overwriting_weights(
+                    MIDDLE_LAYER_SIZE, MIDDLE_LAYER_SIZE, weights2, lines, line_i
+                )
+            if state == 3:
+                overwriting_weights(
+                    NUM_OF_OUTPUTS, MIDDLE_LAYER_SIZE, weights3, lines, line_i
+                )
+
+    with open(f"agents/agent{id}.csv", "w") as f:
+        csv.writer(f).writerows(lines)
 
 
 def set_weights():
@@ -255,12 +278,12 @@ def set_sim():
 
 
 def display(t: int, video_manager=None):
-    gui.line([0.0, 0.0], [100.0, 0.0], radius=2, color=0xFFFFFF)
+    gui.line([0.0, 0.0], [1.0, 0.0], radius=2, color=0xFFFFFF)
     for i in range(NUM_OF_EDGES):
         a, b = edges[i]
         gui.line(
-            [vertices[t, a][0], vertices[t, a][1]],
-            [vertices[t, b][0], vertices[t, b][1]],
+            [vertices[t, a][0] / SCALE, vertices[t, a][1] / SCALE],
+            [vertices[t, b][0] / SCALE, vertices[t, b][1] / SCALE],
             radius=3,
             color=0x068587,
         )
@@ -277,6 +300,20 @@ def simulate(with_display=False, video_manager=None):
         apply_forces(t)
         if with_display:
             display(t, video_manager)
+        # for i in range(NUM_OF_VERTICES):
+        # print(vertices[t, i])
+
+
+def save_video(with_display=False):
+    # Save a video of the final simulation
+    video_manager = ti.tools.VideoManager(
+        output_dir="/home/ethan/Projects/Evolutionary-Robotics/vids",
+        framerate=60,
+        automatic_build=True,
+    )
+    simulate(with_display=with_display, video_manager=video_manager)
+    print("Exporting video...")
+    video_manager.make_video(gif=False, mp4=True)
 
 
 if __name__ == "__main__":
@@ -288,7 +325,7 @@ if __name__ == "__main__":
         matrix2 = []
         matrix3 = []
 
-        reading_in_agent()
+        read_in_agent()
 
         # constants
         NUM_OF_VERTICES = len(points)
@@ -344,18 +381,10 @@ if __name__ == "__main__":
         for _ in range(GENERATIONS):
             set_sim()
             with ti.ad.Tape(loss=loss):
-                simulate(with_display=False)
+                simulate()
                 compute_loss()
             update_weights()
 
-    # Save a video of the final simulation
-    # video_manager = ti.tools.VideoManager(
-    #     output_dir="/home/ethan/Projects/Evolutionary-Robotics/output",
-    #     framerate=60,
-    #     automatic_build=False,
-    # )
-    # simulate(with_display=True, video_manager=video_manager)
-    # print("Exporting video...")
-    # video_manager.make_video(gif=False, mp4=True)
+        set_sim()
 
-    print(SEED)
+        #  ffmpeg -framerate 30 -i 'frame_%06d.png' -c:v libx264 -pix_fmt yuv420p output.mp4
