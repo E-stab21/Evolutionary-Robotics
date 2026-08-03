@@ -4,6 +4,7 @@ import sys
 import time
 from src.classes.robot import Robot
 
+
 class Simulation:
     def __init__(self, direct_or_gui, fitness_id, body_file, brain_file):
         if direct_or_gui == "GUI":
@@ -13,13 +14,13 @@ class Simulation:
             self.gui = False
             p.connect(p.DIRECT, options="--width=1220 --height=1080")
 
-        #world
+        # world
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         p.setGravity(0, 0, -9.8)
         p.loadSDF("dfs/world.sdf")
         p.loadURDF("plane.urdf")
 
-        #body
+        # body
         self.robot = Robot(fitness_id, body_file, brain_file)
 
     def run(self):
@@ -33,10 +34,11 @@ class Simulation:
     def __del__(self):
         p.disconnect()
 
+
 if __name__ == "__main__":
-    #run sim
+    # run sim
     sim = Simulation(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])
     sim.run()
     print()
     print(sim.robot.write_fitness())
-    
+
