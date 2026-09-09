@@ -2,7 +2,6 @@
 Simulation constants and kernels
 """
 
-# imports
 import secrets
 import numpy as np
 import taichi as ti
@@ -15,14 +14,13 @@ from generate import (
     NUM_OF_CONNECTOR_EDGES,
     CONNECTOR_INPUT_SIZE,
     CONNECTOR_HIDDEN_LAYER_SIZE,
+    region_anchors,
 )
 
 
-# globals
 SEED = secrets.randbits(31)
 ti.init(arch=ti.gpu, random_seed=464525965, debug=False, unrolling_limit=0)
 
-# constants
 TIME_STEPS = 1000
 DT = 0.005
 GRAVITY = ti.Vector([0, -9.8])
@@ -46,8 +44,39 @@ GENERATIONS = 30
 
 SCALE = 10.0
 
+WEAK_CONNECTOR_K = 200.0
+STRONG_CONNECTOR_K = 2000.0
+CONNECTOR_DAMPING = 7.0
 
-# kernels
+# Environment parameters (mutated by environments.set_env)
+env_friction = ti.field(dtype=float, shape=())
+env_ground_damping = ti.field(dtype=float, shape=())
+env_gravity_scale = ti.field(dtype=float, shape=())
+env_wind = ti.field(dtype=float, shape=())
+env_slope = ti.field(dtype=float, shape=())
+env_step_x = ti.field(dtype=float, shape=())
+env_step_h = ti.field(dtype=float, shape=())
+env_gap_start = ti.field(dtype=float, shape=())
+env_gap_end = ti.field(dtype=float, shape=())
+env_drag = ti.field(dtype=float, shape=())
+
+
+def reset_flat_env():
+    env_friction[None] = FRICTION_MU
+    env_ground_damping[None] = GROUND_DAMPING
+    env_gravity_scale[None] = 1.0
+    env_wind[None] = 0.0
+    env_slope[None] = 0.0
+    env_step_x[None] = 1e9
+    env_step_h[None] = 0.0
+    env_gap_start[None] = 1e9
+    env_gap_end[None] = 1e9
+    env_drag[None] = 0.0
+
+
+reset_flat_env()
+
+
 @ti.kernel
 def compute_spring_forces(
     t: int,
@@ -57,7 +86,6 @@ def compute_spring_forces(
     forces: ti.template(),
     resting_lengths: ti.template(),
 ):
-    # finding spring forces
     for i in range(NUM_OF_AGENT_EDGES):
         a, b = edges[i]
         delta = vertices[t, b] - vertices[t, a]
@@ -78,20 +106,30 @@ def compute_ground_forces(
     forces: ti.template(),
 ):
     for i in range(NUM_OF_AGENT_VERTICES):
-        if vertices[t, i][1] < GROUND_MARGIN:
-            # normal forces
+        x = vertices[t, i][0]
+        y = vertices[t, i][1]
+        gap = 0
+        if x >= env_gap_start[None] and x <= env_gap_end[None]:
+            gap = 1
+        gh = GROUND_MARGIN + env_slope[None] * x
+        if x >= env_step_x[None]:
+            gh += env_step_h[None]
+        if gap == 0 and y < gh:
             vely = velocities[t, i][1]
-            penetration = GROUND_MARGIN - vertices[t, i][1]
+            penetration = gh - y
             normal_force = penetration * GROUND_K
             if vely < 0.0:
-                normal_force += -vely * GROUND_DAMPING
+                normal_force += -vely * env_ground_damping[None]
             forces[t, i][1] += normal_force
 
-            # friction forces
             velx = velocities[t, i][0]
             friction_dir = -ti.tanh(velx / FRICTION_SMOOTHING)
-            friction_force = normal_force * friction_dir * FRICTION_MU
+            friction_force = normal_force * friction_dir * env_friction[None]
             forces[t, i][0] += friction_force
+
+        forces[t, i][0] += env_wind[None]
+        forces[t, i][0] -= env_drag[None] * velocities[t, i][0]
+        forces[t, i][1] -= env_drag[None] * velocities[t, i][1]
 
 
 @ti.kernel
@@ -111,11 +149,6 @@ def compute_agent_motor_forces(
     weights3: ti.template(),
     motor_indices: ti.template(),
 ):
-    # for i in range(NUM_OF_AGENT_VERTICES):
-    #     penetration = GROUND_MARGIN - vertices[t, sensor_indices[i]][1]
-    #     brain_state[t, i] = 0.5 + 0.5 * ti.tanh(penetration / SENSOR_SMOOTHING)
-
-    # center of mass
     for _ in range(1):
         center_of_mass[None] = ti.Vector([0.0, 0.0])
     for i in range(NUM_OF_AGENT_VERTICES):
@@ -123,7 +156,6 @@ def compute_agent_motor_forces(
     for _ in range(1):
         center_of_mass[None] /= NUM_OF_AGENT_VERTICES
 
-    # setting vertice and velocitiy neurons
     for i in range(NUM_OF_AGENT_VERTICES):
         input_state[t, i] = vertices[t, i][0] - center_of_mass[None][0]
         input_state[t, i + NUM_OF_AGENT_VERTICES] = (
@@ -132,34 +164,29 @@ def compute_agent_motor_forces(
         input_state[t, i + NUM_OF_AGENT_VERTICES * 2] = velocities[t, i][0]
         input_state[t, i + NUM_OF_AGENT_VERTICES * 3] = velocities[t, i][1]
 
-    # setting cpg neurons
     for i in range(10):
         input_state[t, i + NUM_OF_AGENT_VERTICES * 4] = ti.sin(
             t * DT * CPG_FREQUENCY * i + i * 0.35
         )
 
-    # forward pass 1
     for i in range(AGENT_HIDDEN_LAYER_SIZE):
         sum = 0.0
         for j in ti.static(range(AGENT_INPUT_SIZE)):
             sum += input_state[t, j] * weights1[i, j]
         neural_state1[t, i] = ti.tanh(sum)
 
-    # forward pass 2
     for i in range(AGENT_HIDDEN_LAYER_SIZE):
         sum = 0.0
         for j in ti.static(range(AGENT_HIDDEN_LAYER_SIZE)):
             sum += neural_state1[t, j] * weights2[i, j]
         neural_state2[t, i] = ti.tanh(sum)
 
-    # forward pass 3
     for i in range(NUM_OF_AGENT_ACTIVE_EDGES):
         sum = 0.0
         for j in ti.static(range(AGENT_HIDDEN_LAYER_SIZE)):
             sum += neural_state2[t, j] * weights3[i, j]
         output_state[t, i] = ti.tanh(sum)
 
-    # converting motor values to forces
     for i in range(NUM_OF_AGENT_ACTIVE_EDGES):
         a, b = edges[motor_indices[i]]
         delta = vertices[t, b] - vertices[t, a]
@@ -169,7 +196,63 @@ def compute_agent_motor_forces(
 
 
 @ti.kernel
-def compute_connector_motor_forces(
+def compute_connector_nn(
+    t: int,
+    agent1_vertices: ti.template(),
+    agent1_velocities: ti.template(),
+    agent2_vertices: ti.template(),
+    agent2_velocities: ti.template(),
+    agent1_center: ti.template(),
+    agent2_center: ti.template(),
+    agent1_avg_velocity: ti.template(),
+    agent2_avg_velocity: ti.template(),
+    input_state: ti.template(),
+    hidden_state: ti.template(),
+    output_state: ti.template(),
+    weights1: ti.template(),
+    weights2: ti.template(),
+):
+    for _ in range(1):
+        agent1_center[None] = ti.Vector([0.0, 0.0])
+        agent2_center[None] = ti.Vector([0.0, 0.0])
+        agent1_avg_velocity[None] = ti.Vector([0.0, 0.0])
+        agent2_avg_velocity[None] = ti.Vector([0.0, 0.0])
+
+    for i in range(NUM_OF_AGENT_VERTICES):
+        agent1_center[None] += agent1_vertices[t, i]
+        agent2_center[None] += agent2_vertices[t, i]
+        agent1_avg_velocity[None] += agent1_velocities[t, i]
+        agent2_avg_velocity[None] += agent2_velocities[t, i]
+
+    for _ in range(1):
+        agent1_center[None] /= NUM_OF_AGENT_VERTICES
+        agent2_center[None] /= NUM_OF_AGENT_VERTICES
+        agent1_avg_velocity[None] /= NUM_OF_AGENT_VERTICES
+        agent2_avg_velocity[None] /= NUM_OF_AGENT_VERTICES
+
+    for i in range(2):
+        input_state[i] = agent1_center[None][i]
+        input_state[i + 2] = agent2_center[None][i]
+        input_state[i + 4] = agent1_avg_velocity[None][i]
+        input_state[i + 6] = agent2_avg_velocity[None][i]
+        input_state[i + 8] = agent2_center[None][i] - agent1_center[None][i]
+        input_state[i + 10] = agent2_avg_velocity[None][i] - agent1_avg_velocity[None][i]
+
+    for i in range(CONNECTOR_HIDDEN_LAYER_SIZE):
+        sum = 0.0
+        for j in ti.static(range(CONNECTOR_INPUT_SIZE)):
+            sum += input_state[j] * weights1[i, j]
+        hidden_state[i] = ti.tanh(sum)
+
+    for i in range(NUM_OF_CONNECTOR_EDGES):
+        sum = 0.0
+        for j in ti.static(range(CONNECTOR_HIDDEN_LAYER_SIZE)):
+            sum += hidden_state[j] * weights2[i, j]
+        output_state[i] = ti.tanh(sum)
+
+
+@ti.kernel
+def apply_connector_forces(
     t: int,
     agent1_vertices: ti.template(),
     agent1_velocities: ti.template(),
@@ -177,53 +260,25 @@ def compute_connector_motor_forces(
     agent2_vertices: ti.template(),
     agent2_velocities: ti.template(),
     agent2_forces: ti.template(),
-    weights1: ti.template(),
-    weights2: ti.template(),
+    agent1_anchors: ti.template(),
+    agent2_anchors: ti.template(),
+    resting_lengths: ti.template(),
+    output_state: ti.template(),
+    connector_k: float,
 ):
-    agent1_center = ti.Vector([0.0, 0.0])
-    agent2_center = ti.Vector([0.0, 0.0])
-    agent1_avg_velocity = ti.Vector([0.0, 0.0])
-    agent2_avg_velocity = ti.Vector([0.0, 0.0])
-    input_state = ti.Vector.zero(float, CONNECTOR_INPUT_SIZE)
-    hidden_state = ti.Vector.zero(float, CONNECTOR_HIDDEN_LAYER_SIZE)
-    output_state = ti.Vector.zero(float, NUM_OF_CONNECTOR_EDGES)
-
-    for i in range(NUM_OF_AGENT_VERTICES):
-        agent1_center += agent1_vertices[t, i]
-        agent2_center += agent2_vertices[t, i]
-        agent1_avg_velocity += agent1_velocities[t, i]
-        agent2_avg_velocity += agent2_velocities[t, i]
-
-    agent1_center /= NUM_OF_AGENT_VERTICES
-    agent2_center /= NUM_OF_AGENT_VERTICES
-    agent1_avg_velocity /= NUM_OF_AGENT_VERTICES
-    agent2_avg_velocity /= NUM_OF_AGENT_VERTICES
-
-    for i in range(2):
-        input_state[i] = agent1_center[i]
-        input_state[i + 2] = agent2_center[i]
-        input_state[i + 4] = agent1_avg_velocity[i]
-        input_state[i + 6] = agent2_avg_velocity[i]
-        input_state[i + 8] = agent2_center[i] - agent1_center[i]
-        input_state[i + 10] = agent2_avg_velocity[i] - agent1_avg_velocity[i]
-
-    for i in ti.static(range(CONNECTOR_HIDDEN_LAYER_SIZE)):
-        sum = 0.0
-        for j in ti.static(range(CONNECTOR_INPUT_SIZE)):
-            sum += input_state[j] * weights1[i, j]
-        hidden_state[i] = ti.tanh(sum)
-
-    for i in ti.static(range(NUM_OF_CONNECTOR_EDGES)):
-        sum = 0.0
-        for j in ti.static(range(CONNECTOR_HIDDEN_LAYER_SIZE)):
-            sum += hidden_state[j] * weights2[i, j]
-        output_state[i] = ti.tanh(sum)
-
-    for i in ti.static(range(NUM_OF_CONNECTOR_EDGES)):
-        delta = agent2_vertices[t, i] - agent1_vertices[t, i]
-        force = delta.normalized() * output_state[i] * MOTOR_FORCE
-        agent1_forces[t, i] += force
-        agent2_forces[t, i] -= force
+    for i in range(NUM_OF_CONNECTOR_EDGES):
+        a = agent1_anchors[i]
+        b = agent2_anchors[i]
+        delta = agent2_vertices[t, b] - agent1_vertices[t, a]
+        length = delta.norm() + 1e-6
+        direction = delta / length
+        spring_force = connector_k * (length - resting_lengths[i])
+        rel_vel = agent2_velocities[t, b] - agent1_velocities[t, a]
+        damping_force = CONNECTOR_DAMPING * rel_vel.dot(direction)
+        motor = output_state[i] * MOTOR_FORCE
+        force = direction * (spring_force + damping_force + motor)
+        agent1_forces[t, a] += force
+        agent2_forces[t, b] -= force
 
 
 @ti.kernel
@@ -231,7 +286,8 @@ def apply_forces(
     t: int, vertices: ti.template(), velocities: ti.template(), forces: ti.template()
 ):
     for i in range(NUM_OF_AGENT_VERTICES):
-        velocities[t + 1, i] = velocities[t, i] + (GRAVITY + forces[t, i]) * DT
+        g = GRAVITY * env_gravity_scale[None]
+        velocities[t + 1, i] = velocities[t, i] + (g + forces[t, i]) * DT
         vertices[t + 1, i] = vertices[t, i] + velocities[t + 1, i] * DT
 
 
@@ -248,7 +304,6 @@ def compute_loss(
         loss[None] -= agent2_vertices[TIME_STEPS - 1, i][0]
     for _ in range(1):
         loss[None] /= 2 * NUM_OF_AGENT_VERTICES
-    # print(loss[None])
 
 
 @ti.kernel
@@ -269,7 +324,6 @@ def update_agent_weights(
         grad = weights3.grad[i, j]
         grad = ti.max(ti.min(grad, GRAD_CLIP), -GRAD_CLIP)
         weights3[i, j] -= grad * LR
-        # print(grad)
 
 
 @ti.kernel
@@ -291,13 +345,23 @@ def set_agent(agent):
         agent.forces[t, i] = ti.Vector([0.0, 0.0])
 
 
+def mean_x(vertices_field, t):
+    pts = vertices_field.to_numpy()[t]
+    return float(pts[:, 0].mean())
+
+
+def agent_fitness(agent):
+    return mean_x(agent.vertices, TIME_STEPS - 1) - mean_x(agent.vertices, 0)
+
+
 class Agent:
-    def __init__(self, agent_id):
-        self.path = f"agents/agent{agent_id}.npz"
+    def __init__(self, agent_id, directory="agents"):
+        self.path = f"{directory}/agent{agent_id}.npz"
         loaded = np.load(self.path)
         self.points = loaded["points"].tolist()
         self.springs = loaded["springs"].tolist()
-        self.active_springs = []
+        self.fitness = float(loaded["fitness"]) if "fitness" in loaded.files else 0.0
+        self.anchors_np = np.array(region_anchors(self.points), dtype=np.int32)
 
         self.velocities = ti.Vector.field(
             n=2,
@@ -320,6 +384,7 @@ class Agent:
         self.edges = ti.Vector.field(n=2, dtype=int, shape=(NUM_OF_AGENT_EDGES,))
         self.resting_lengths = ti.field(dtype=float, shape=(NUM_OF_AGENT_EDGES,))
         self.motor_indices = ti.field(dtype=int, shape=(NUM_OF_AGENT_ACTIVE_EDGES,))
+        self.anchors = ti.field(dtype=int, shape=(NUM_OF_CONNECTOR_EDGES,))
         self.center_of_mass = ti.Vector.field(
             n=2, dtype=float, shape=(), needs_grad=True
         )
@@ -361,6 +426,7 @@ class Agent:
         self.weights1.from_numpy(loaded["weights1"])
         self.weights2.from_numpy(loaded["weights2"])
         self.weights3.from_numpy(loaded["weights3"])
+        self.anchors.from_numpy(self.anchors_np)
 
         j = 0
         for i, spring in enumerate(self.springs):
@@ -390,12 +456,15 @@ class Agent:
             diff = self.vertices[0, a] - self.vertices[0, b]
             self.resting_lengths[i] = diff.norm()
 
-    def write(self):
+    def write(self, fitness=None):
+        if fitness is not None:
+            self.fitness = float(fitness)
         np.savez(
             self.path,
             points=np.asarray(self.points),
             springs=np.asarray(self.springs),
             status="trained",
+            fitness=self.fitness,
             weights1=self.weights1.to_numpy(),
             weights2=self.weights2.to_numpy(),
             weights3=self.weights3.to_numpy(),
@@ -403,12 +472,33 @@ class Agent:
 
 
 class Connector:
-    def __init__(self, connector_id, agent1, agent2):
-        self.path = f"connectors/connector{connector_id}.npz"
+    def __init__(self, connector_id, agent1, agent2, directory="connectors"):
+        self.path = f"{directory}/connector{connector_id}.npz"
         loaded = np.load(self.path)
         self.type = loaded["connector_type"].item()
+        self.strength = (
+            loaded["strength"].item() if "strength" in loaded.files else "weak"
+        )
+        self.k = (
+            WEAK_CONNECTOR_K if self.strength == "weak" else STRONG_CONNECTOR_K
+        )
         self.agent1 = agent1
         self.agent2 = agent2
+        self.resting_lengths = ti.field(dtype=float, shape=(NUM_OF_CONNECTOR_EDGES,))
+        self.agent1_center = ti.Vector.field(n=2, dtype=float, shape=(), needs_grad=True)
+        self.agent2_center = ti.Vector.field(n=2, dtype=float, shape=(), needs_grad=True)
+        self.agent1_avg_velocity = ti.Vector.field(
+            n=2, dtype=float, shape=(), needs_grad=True
+        )
+        self.agent2_avg_velocity = ti.Vector.field(
+            n=2, dtype=float, shape=(), needs_grad=True
+        )
+        self.input_state = ti.field(
+            dtype=float, shape=(CONNECTOR_INPUT_SIZE,), needs_grad=True
+        )
+        self.hidden_state = ti.field(
+            dtype=float, shape=(CONNECTOR_HIDDEN_LAYER_SIZE,), needs_grad=True
+        )
         self.weights1 = ti.field(
             dtype=float,
             shape=(CONNECTOR_HIDDEN_LAYER_SIZE, CONNECTOR_INPUT_SIZE),
@@ -419,16 +509,21 @@ class Connector:
             shape=(NUM_OF_CONNECTOR_EDGES, CONNECTOR_HIDDEN_LAYER_SIZE),
             needs_grad=True,
         )
+        self.output_state = ti.field(
+            dtype=float, shape=(NUM_OF_CONNECTOR_EDGES,), needs_grad=True
+        )
 
-        self.weights1.from_numpy(loaded["weights1"])
-        self.weights2.from_numpy(loaded["weights2"])
+        self.weights1.from_numpy(loaded["weights1"].astype(np.float32))
+        self.weights2.from_numpy(loaded["weights2"].astype(np.float32))
+        self.resting_lengths.from_numpy(
+            np.ones(NUM_OF_CONNECTOR_EDGES, dtype=np.float32)
+        )
 
     def write(self):
-        loaded = np.load(self.path)
         np.savez(
             self.path,
             connector_type=self.type,
-            pos=loaded["pos"],
+            strength=self.strength,
             weights1=self.weights1.to_numpy(),
             weights2=self.weights2.to_numpy(),
         )

@@ -3,6 +3,7 @@ Script that generates agent's and connector's
 """
 
 # imports
+import os
 import random
 import numpy as np
 
@@ -23,14 +24,15 @@ CONNECTOR_HIDDEN_LAYER_SIZE = 20
 
 
 # agent generation
-def generate_agents(num_of_agents):
+def generate_agents(num_of_agents, directory="agents"):
+    os.makedirs(directory, exist_ok=True)
     for id in range(num_of_agents):
         vertices = [(random.randint(0, MAX_X), random.randint(0, MAX_Y))]
         edges = []
         chosen = []
 
         # vertex generation
-        for _ in range(NUM_OF_AGENT_VERTICES):
+        for _ in range(NUM_OF_AGENT_VERTICES - 1):
             check = True
             while check:
                 possible = []
@@ -49,7 +51,7 @@ def generate_agents(num_of_agents):
                     check = False
 
         # edge generation
-        for _ in range(NUM_OF_AGENT_EDGES - NUM_OF_AGENT_VERTICES + 1):
+        for _ in range(NUM_OF_AGENT_EDGES - len(edges)):
             check = True
             while check:
                 rand_edge = [
@@ -79,43 +81,54 @@ def generate_agents(num_of_agents):
         vertices = np.array(vertices)
 
         np.savez(
-            f"agents/agent{id}.npz",
+            f"{directory}/agent{id}.npz",
             points=vertices,
             springs=edges,
             status="untrained",
+            fitness=0.0,
             weights1=weights1,
             weights2=weights2,
             weights3=weights3,
         )
 
 
-# connector generation
-def generate_connectors(num_of_connectors, connector_type):
-    if connector_type != "uniform" and connector_type != "diverse":
-        raise Exception("Incorrect connector type")
+# Fixed grid-region targets for connector anchors (same areas on every agent).
+REGION_TARGETS = [(0, 0), (1, 2), (3, 2), (5, 2), (6, 4)]
 
-    for id in range(num_of_connectors):
-        # locals
-        vertices = []
-        weights1 = np.random.rand(CONNECTOR_HIDDEN_LAYER_SIZE, CONNECTOR_INPUT_SIZE)
-        weights2 = np.random.rand(NUM_OF_CONNECTOR_EDGES, CONNECTOR_HIDDEN_LAYER_SIZE)
 
-        # create endpoints
-        for _ in range(NUM_OF_CONNECTOR_EDGES):
-            vertices.append(
-                [
-                    [random.randint(0, MAX_X), random.randint(0, MAX_Y)],
-                    [random.randint(0, MAX_X), random.randint(0, MAX_Y)],
-                ]
-            )
-
-        positions = np.array(vertices)
-
-        # saving to file
-        np.savez(
-            f"connectors/connector{id}.npz",
-            pos=positions,
-            connector_type=connector_type,
-            weights1=weights1,
-            weights2=weights2,
+def region_anchors(points):
+    anchors = []
+    used = set()
+    for tx, ty in REGION_TARGETS:
+        ranked = sorted(
+            range(len(points)),
+            key=lambda i: (points[i][0] - tx) ** 2 + (points[i][1] - ty) ** 2,
         )
+        pick = next((i for i in ranked if i not in used), ranked[0])
+        anchors.append(pick)
+        used.add(pick)
+    return anchors
+
+
+# connector generation
+def generate_connectors(num_per_set=10, directory="connectors"):
+    os.makedirs(directory, exist_ok=True)
+    connector_id = 0
+    for strength in ("weak", "strong"):
+        for pairing in ("uniform", "diverse"):
+            for _ in range(num_per_set):
+                weights1 = np.random.rand(
+                    CONNECTOR_HIDDEN_LAYER_SIZE, CONNECTOR_INPUT_SIZE
+                )
+                weights2 = np.random.rand(
+                    NUM_OF_CONNECTOR_EDGES, CONNECTOR_HIDDEN_LAYER_SIZE
+                )
+                np.savez(
+                    f"{directory}/connector{connector_id}.npz",
+                    connector_type=pairing,
+                    strength=strength,
+                    weights1=weights1,
+                    weights2=weights2,
+                )
+                connector_id += 1
+    return connector_id

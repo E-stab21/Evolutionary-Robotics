@@ -2,28 +2,37 @@
 Agent training and simulation
 """
 
-# imports
-import taichi as ti
+import os
 import sys
+import taichi as ti
 import simulation as sim
+import environments as envs
 
 
-gui = ti.GUI("Sim", res=600)
+gui = None
+
+
+def _gui():
+    global gui
+    if gui is None:
+        gui = ti.GUI("Sim", res=600)
+    return gui
 
 
 def display(agent, t, video_manager=None):
-    gui.line([0.0, 0.0], [1.0, 0.0], radius=2, color=0xFFFFFF)
+    g = _gui()
+    g.line([0.0, 0.0], [1.0, 0.0], radius=2, color=0xFFFFFF)
     for i in range(sim.NUM_OF_AGENT_EDGES):
         a, b = agent.edges[i]
-        gui.line(
+        g.line(
             [agent.vertices[t, a][0] / sim.SCALE, agent.vertices[t, a][1] / sim.SCALE],
             [agent.vertices[t, b][0] / sim.SCALE, agent.vertices[t, b][1] / sim.SCALE],
             radius=3,
             color=0x068587,
         )
     if video_manager is not None:
-        video_manager.write_frame(gui.get_image())
-    gui.show()
+        video_manager.write_frame(g.get_image())
+    g.show()
 
 
 def simulate(agent, with_display=False, video_manager=None):
@@ -69,15 +78,18 @@ def save_video(agent, with_display=False):
     video_manager.make_video(gif=False, mp4=True)
 
 
-def watch(agent_id):
-    agent = sim.Agent(agent_id)
+def watch(agent_id, directory="agents"):
+    agent = sim.Agent(agent_id, directory=directory)
     sim.set_agent(agent)
+    envs.set_env("flat")
     simulate(agent, with_display=True)
 
 
-def train_agents(agent_start, agent_end):
+def train_agents(agent_start, agent_end, directory="agents"):
+    os.makedirs(directory, exist_ok=True)
+    envs.set_env("flat")
     for agent_id in range(agent_start, agent_end + 1):
-        agent = sim.Agent(agent_id)
+        agent = sim.Agent(agent_id, directory=directory)
 
         for _ in range(sim.GENERATIONS):
             sim.set_agent(agent)
@@ -86,13 +98,17 @@ def train_agents(agent_start, agent_end):
                 sim.compute_loss(agent.vertices, agent.vertices, agent.loss)
             sim.update_agent_weights(agent.weights1, agent.weights2, agent.weights3)
 
-        agent.write()
+        sim.set_agent(agent)
+        simulate(agent)
+        agent.write(fitness=sim.agent_fitness(agent))
+        print(f"agent{agent_id} fitness={agent.fitness:.4f}")
 
 
 def main():
     agent_start = int(sys.argv[2])
     agent_end = int(sys.argv[3])
-    train_agents(agent_start, agent_end)
+    directory = sys.argv[4] if len(sys.argv) > 4 else "agents"
+    train_agents(agent_start, agent_end, directory=directory)
 
 
 if __name__ == "__main__":
