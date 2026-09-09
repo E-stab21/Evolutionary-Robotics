@@ -1,0 +1,114 @@
+Legacy commented-out code moved from src/taichi/replication/train.py
+
+--- read_in_agent (CSV) ---
+
+def read_in_agent():
+with open(f"agents/agent{id}.csv", "r") as f:
+    data = csv.reader(f)
+    state = 0
+    for row in data:
+        # skip over the start
+        if not state:
+            state += 1
+            continue
+
+        try:
+            row = [float(i.strip()) for i in row]
+        except ValueError:
+            state += 1
+            continue
+
+        # reading
+        if state == 1:
+            points.append(row)
+        elif state == 2:
+            if row[2]:
+                active_springs.append(len(springs))
+            springs.append((int(row[0]), int(row[1])))
+        elif state == 3:
+            fweights1.append(row)
+        elif state == 4:
+            fweights2.append(row)
+        elif state == 5:
+            fweights3.append(row)
+
+# offsetting grid
+for i in range(len(points)):
+    if points[i][1] == 2.0 or points[i][1] == 4.0:
+        points[i][0] += 0.5
+
+--- CSV weight overwrite (old write path) ---
+
+def overwriting_weights(n, m, weights, lines, line_i):
+    for i in range(n):
+        temp = []
+        for j in range(m):
+            temp.append(str(weights[i, j]))
+        lines[line_i + i] = temp
+
+lines = None
+with open(f"agents/agent{id}.csv", "r") as f:
+    lines = list(csv.reader(f))
+    state = 0
+    for line_i in range(len(lines)):
+        if lines[line_i][:-1] == "Matrix":
+            state += 1
+
+        if state == 1:
+            overwriting_weights(
+                sim.MIDDLE_LAYER_SIZE, sim.NUM_OF_INPUTS, weights1, lines, line_i
+            )
+        if state == 2:
+            overwriting_weights(
+                sim.MIDDLE_LAYER_SIZE,
+                sim.MIDDLE_LAYER_SIZE,
+                weights2,
+                lines,
+                line_i,
+            )
+        if state == 3:
+            overwriting_weights(
+                sim.NUM_OF_OUTPUTS, sim.MIDDLE_LAYER_SIZE, weights3, lines, line_i
+            )
+
+with open(f"agents/agent{id}.csv", "w") as f:
+    csv.writer(f).writerows(lines)
+
+--- misc ---
+
+ffmpeg -framerate 30 -i 'frame_%06d.png' -c:v libx264 -pix_fmt yuv420p output.mp4
+
+--- generate.py CSV agent file write ---
+
+with open(
+    f"/home/ethan/Projects/Evolutionary-Robotics/src/taichi/replication/agents/agent{id}.csv",
+    "w",
+) as f:
+    f.write("Points: \n")
+    for point in points:
+        f.write(f"{point[0]}, {point[1]}\n")
+
+    f.write("Springs:\n")
+    for spring in springs:
+        f.write(f"{spring[0]}, {spring[1]}, {spring[2]}\n")
+
+    f.write("Matrix 1:\n")
+    for row in weights1:
+        f.write(f"{row[0]}")
+        for num in row[1:]:
+            f.write(f",{num}")
+        f.write("\n")
+
+    f.write("Matrix 2:\n")
+    for row in weights2:
+        f.write(f"{row[0]}")
+        for num in row[1:]:
+            f.write(f",{num}")
+        f.write("\n")
+
+    f.write("Matrix 3:\n")
+    for row in weights3:
+        f.write(f"{row[0]}")
+        for num in row[1:]:
+            f.write(f",{num}")
+        f.write("\n")
