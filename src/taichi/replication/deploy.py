@@ -24,9 +24,9 @@ COLLECTIVE_TYPES = [
 ]
 
 
-def list_connectors(strength, train_pairing):
+def list_connectors(strength, train_pairing, max_id=200):
     ids = []
-    for connector_id in range(40):
+    for connector_id in range(max_id):
         path = f"connectors/connector{connector_id}.npz"
         if not os.path.exists(path):
             continue
@@ -72,10 +72,10 @@ def eval_collective(strength, train_pairing, deploy_pairing, agent_ids, env_name
         connector = sim.Connector(
             connector_id, sim.Agent(agent_id), sim.Agent(partner_id)
         )
-        train_connectors.place_pair(connector.agent1, connector.agent2)
-        train_connectors.refresh_rest_lengths(connector)
         sim.set_agent(connector.agent1)
         sim.set_agent(connector.agent2)
+        train_connectors.place_pair(connector.agent1, connector.agent2)
+        train_connectors.refresh_rest_lengths(connector)
         train_connectors.simulate(connector)
         scores.append(collective_fitness(connector))
     return float(np.mean(scores)) if scores else 0.0

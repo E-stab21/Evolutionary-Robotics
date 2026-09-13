@@ -155,10 +155,10 @@ def simulate(connector, with_display=False, video_manager=None):
 
 def watch(connector_id, agent1_id, agent2_id):
     connector = sim.Connector(connector_id, sim.Agent(agent1_id), sim.Agent(agent2_id))
-    place_pair(connector.agent1, connector.agent2)
-    refresh_rest_lengths(connector)
     sim.set_agent(connector.agent1)
     sim.set_agent(connector.agent2)
+    place_pair(connector.agent1, connector.agent2)
+    refresh_rest_lengths(connector)
     envs.set_env("flat")
     simulate(connector, with_display=True)
 
@@ -183,19 +183,19 @@ def train_connectors(connector_start, connector_end, agent_start, agent_end):
 
     for connector_id in range(connector_start, connector_end + 1):
         pairing, strength = load_connector_meta(connector_id)
-        print(f"training connector{connector_id} ({strength}/{pairing})")
+        print(f"training connector{connector_id} ({strength}/{pairing})", flush=True)
 
         for agent_id in agent_ids:
             partner_id = choose_partner_id(agent_id, agent_ids, pairing)
+            connector = sim.Connector(
+                connector_id, sim.Agent(agent_id), sim.Agent(partner_id)
+            )
 
             for _ in range(sim.GENERATIONS):
-                connector = sim.Connector(
-                    connector_id, sim.Agent(agent_id), sim.Agent(partner_id)
-                )
-                place_pair(connector.agent1, connector.agent2)
-                refresh_rest_lengths(connector)
                 sim.set_agent(connector.agent1)
                 sim.set_agent(connector.agent2)
+                place_pair(connector.agent1, connector.agent2)
+                refresh_rest_lengths(connector)
                 with ti.ad.Tape(loss=connector.agent1.loss):
                     simulate(connector)
                     sim.compute_loss(
@@ -204,7 +204,8 @@ def train_connectors(connector_start, connector_end, agent_start, agent_end):
                         connector.agent1.loss,
                     )
                 sim.update_connector_weights(connector.weights1, connector.weights2)
-                connector.write()
+
+            connector.write()
 
 
 def main():

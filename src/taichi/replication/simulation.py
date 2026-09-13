@@ -2,6 +2,7 @@
 Simulation constants and kernels
 """
 
+import os
 import secrets
 import numpy as np
 import taichi as ti
@@ -19,9 +20,11 @@ from generate import (
 
 
 SEED = secrets.randbits(31)
-ti.init(arch=ti.gpu, random_seed=464525965, debug=False, unrolling_limit=0)
+_ARCH = os.environ.get("META_ROBOTS_ARCH", "cpu").lower()
+_TI_ARCH = ti.cpu if _ARCH in ("cpu", "x64", "arm64") else ti.gpu
+ti.init(arch=_TI_ARCH, random_seed=464525965, debug=False, unrolling_limit=0)
 
-TIME_STEPS = 1000
+TIME_STEPS = int(os.environ.get("META_ROBOTS_TIME_STEPS", "1000"))
 DT = 0.005
 GRAVITY = ti.Vector([0, -9.8])
 SPRING_K = 1500.0
@@ -40,7 +43,7 @@ CPG_FREQUENCY = 20.0
 
 LR = 0.01
 GRAD_CLIP = 10.0
-GENERATIONS = 30
+GENERATIONS = int(os.environ.get("META_ROBOTS_GENERATIONS", "30"))
 
 SCALE = 10.0
 
@@ -339,10 +342,26 @@ def update_connector_weights(weights1: ti.template(), weights2: ti.template()):
         weights2[i, j] -= grad * LR
 
 
-def set_agent(agent):
+@ti.kernel
+def clear_agent_state(
+    velocities: ti.template(),
+    forces: ti.template(),
+):
     for t, i in ti.ndrange(TIME_STEPS, NUM_OF_AGENT_VERTICES):
-        agent.velocities[t, i] = ti.Vector([0.0, 0.0])
-        agent.forces[t, i] = ti.Vector([0.0, 0.0])
+        velocities[t, i] = ti.Vector([0.0, 0.0])
+        forces[t, i] = ti.Vector([0.0, 0.0])
+
+
+@ti.kernel
+def copy_initial_pose(src: ti.template(), dst: ti.template()):
+    for i in range(NUM_OF_AGENT_VERTICES):
+        dst[0, i] = src[i]
+
+
+def set_agent(agent):
+    clear_agent_state(agent.velocities, agent.forces)
+    if hasattr(agent, "initial_pose"):
+        copy_initial_pose(agent.initial_pose, agent.vertices)
 
 
 def mean_x(vertices_field, t):
@@ -423,9 +442,9 @@ class Agent:
         )
         self.loss = ti.field(dtype=float, shape=(), needs_grad=True)
 
-        self.weights1.from_numpy(loaded["weights1"])
-        self.weights2.from_numpy(loaded["weights2"])
-        self.weights3.from_numpy(loaded["weights3"])
+        self.weights1.from_numpy(loaded["weights1"].astype(np.float32))
+        self.weights2.from_numpy(loaded["weights2"].astype(np.float32))
+        self.weights3.from_numpy(loaded["weights3"].astype(np.float32))
         self.anchors.from_numpy(self.anchors_np)
 
         j = 0
@@ -445,11 +464,11 @@ class Agent:
         min_x = min(x for x, _ in initial_points)
         min_y = min(y for _, y in initial_points)
 
+        self.initial_pose = ti.Vector.field(n=2, dtype=float, shape=(NUM_OF_AGENT_VERTICES,))
         for i, (x, y) in enumerate(initial_points):
-            self.vertices[0, i] = (
-                x - min_x + START_MARGIN,
-                y - min_y + START_MARGIN,
-            )
+            pose = (x - min_x + START_MARGIN, y - min_y + START_MARGIN)
+            self.initial_pose[i] = pose
+            self.vertices[0, i] = pose
 
         for i in range(NUM_OF_AGENT_EDGES):
             a, b = self.edges[i]

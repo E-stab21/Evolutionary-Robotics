@@ -5,4 +5,9 @@
 *.sdf
 *.nndf
 data/
-__pycache__
+__pycache__/
+src/taichi/replication/agents_pool/
+src/taichi/replication/connectors/
+src/taichi/replication/results.csv
+src/taichi/replication/results_smoke.csv
+src/taichi/replication/__pycache__/
