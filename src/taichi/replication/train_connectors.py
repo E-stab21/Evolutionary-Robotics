@@ -2,25 +2,15 @@
 Connector training and simulation
 """
 
+import argparse
 import random
-import sys
-import taichi as ti
 import numpy as np
-import simulation as sim
-import environments as envs
-
-
-gui = None
-
-
-def _gui():
-    global gui
-    if gui is None:
-        gui = ti.GUI("Sim", res=600)
-    return gui
 
 
 def place_pair(agent1, agent2, offset=3.0):
+    import taichi as ti
+    import simulation as sim
+
     a1 = agent1.vertices.to_numpy()[0]
     a2 = agent2.vertices.to_numpy()[0]
     shift = float(a1[:, 0].max()) + offset - float(a2[:, 0].min())
@@ -30,6 +20,8 @@ def place_pair(agent1, agent2, offset=3.0):
 
 
 def refresh_rest_lengths(connector):
+    import simulation as sim
+
     a1 = connector.agent1.vertices.to_numpy()[0]
     a2 = connector.agent2.vertices.to_numpy()[0]
     rests = []
@@ -40,24 +32,39 @@ def refresh_rest_lengths(connector):
     connector.resting_lengths.from_numpy(np.array(rests, dtype=np.float32))
 
 
-def display(connector, t, video_manager=None):
-    g = _gui()
+def display(connector, t, video_manager=None, gui=None):
+    import simulation as sim
+    import train_agents
+
     agent1 = connector.agent1
     agent2 = connector.agent2
-    g.line([0.0, 0.0], [1.0, 0.0], radius=2, color=0xFFFFFF)
+    pts1 = agent1.vertices.to_numpy()[t]
+    pts2 = agent2.vertices.to_numpy()[t]
+    edges1 = agent1.edges_np
+    edges2 = agent2.edges_np
+    com_x = 0.5 * (float(pts1[:, 0].mean()) + float(pts2[:, 0].mean()))
+    view = 12.0
 
-    for agent, color in ((agent1, 0x068587), (agent2, 0xED553B)):
+    gui.line(
+        train_agents._world_to_gui(-view, 0.0, com_x, view),
+        train_agents._world_to_gui(view, 0.0, com_x, view),
+        radius=2,
+        color=0xFFFFFF,
+    )
+
+    for pts, edges, color in (
+        (pts1, edges1, 0x068587),
+        (pts2, edges2, 0xED553B),
+    ):
         for i in range(sim.NUM_OF_AGENT_EDGES):
-            a, b = agent.edges[i]
-            g.line(
-                [
-                    agent.vertices[t, a][0] / sim.SCALE,
-                    agent.vertices[t, a][1] / sim.SCALE,
-                ],
-                [
-                    agent.vertices[t, b][0] / sim.SCALE,
-                    agent.vertices[t, b][1] / sim.SCALE,
-                ],
+            a, b = int(edges[i, 0]), int(edges[i, 1])
+            gui.line(
+                train_agents._world_to_gui(
+                    float(pts[a, 0]), float(pts[a, 1]), com_x, view
+                ),
+                train_agents._world_to_gui(
+                    float(pts[b, 0]), float(pts[b, 1]), com_x, view
+                ),
                 radius=3,
                 color=color,
             )
@@ -65,25 +72,25 @@ def display(connector, t, video_manager=None):
     a1 = agent1.anchors_np
     a2 = agent2.anchors_np
     for i in range(sim.NUM_OF_CONNECTOR_EDGES):
-        g.line(
-            [
-                agent1.vertices[t, a1[i]][0] / sim.SCALE,
-                agent1.vertices[t, a1[i]][1] / sim.SCALE,
-            ],
-            [
-                agent2.vertices[t, a2[i]][0] / sim.SCALE,
-                agent2.vertices[t, a2[i]][1] / sim.SCALE,
-            ],
+        gui.line(
+            train_agents._world_to_gui(
+                float(pts1[a1[i], 0]), float(pts1[a1[i], 1]), com_x, view
+            ),
+            train_agents._world_to_gui(
+                float(pts2[a2[i], 0]), float(pts2[a2[i], 1]), com_x, view
+            ),
             radius=2,
             color=0xF6D55C,
         )
 
     if video_manager is not None:
-        video_manager.write_frame(g.get_image())
-    g.show()
+        video_manager.write_frame(gui.get_image())
+    gui.show()
 
 
-def simulate(connector, with_display=False, video_manager=None):
+def simulate(connector, with_display=False, video_manager=None, gui=None):
+    import simulation as sim
+
     agent1 = connector.agent1
     agent2 = connector.agent2
 
@@ -150,17 +157,22 @@ def simulate(connector, with_display=False, video_manager=None):
         sim.apply_forces(t, agent2.vertices, agent2.velocities, agent2.forces)
 
         if with_display:
-            display(connector, t, video_manager)
+            display(connector, t, video_manager, gui=gui)
 
 
 def watch(connector_id, agent1_id, agent2_id):
+    import taichi as ti
+    import simulation as sim
+    import environments as envs
+
     connector = sim.Connector(connector_id, sim.Agent(agent1_id), sim.Agent(agent2_id))
     sim.set_agent(connector.agent1)
     sim.set_agent(connector.agent2)
     place_pair(connector.agent1, connector.agent2)
     refresh_rest_lengths(connector)
     envs.set_env("flat")
-    simulate(connector, with_display=True)
+    gui = ti.GUI("Sim", res=600)
+    simulate(connector, with_display=True, gui=gui)
 
 
 def load_connector_meta(connector_id):
@@ -178,6 +190,10 @@ def choose_partner_id(agent_id, agent_ids, pairing):
 
 
 def train_connectors(connector_start, connector_end, agent_start, agent_end):
+    import taichi as ti
+    import simulation as sim
+    import environments as envs
+
     agent_ids = list(range(agent_start, agent_end + 1))
     envs.set_env("flat")
 
@@ -209,11 +225,36 @@ def train_connectors(connector_start, connector_end, agent_start, agent_end):
 
 
 def main():
-    connector_start = int(sys.argv[2])
-    connector_end = int(sys.argv[3])
-    agent_start = int(sys.argv[4])
-    agent_end = int(sys.argv[5])
-    train_connectors(connector_start, connector_end, agent_start, agent_end)
+    import runtime as rt
+
+    parser = argparse.ArgumentParser(description="Train or watch connectors")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    watch_p = sub.add_parser("watch", help="GUI playback of a tethered pair")
+    watch_p.add_argument("connector_id", type=int)
+    watch_p.add_argument("agent1_id", type=int)
+    watch_p.add_argument("agent2_id", type=int)
+    rt.add_arch_args(watch_p)
+
+    train_p = sub.add_parser("train", help="Train a range of connectors")
+    train_p.add_argument("connector_start", type=int)
+    train_p.add_argument("connector_end", type=int)
+    train_p.add_argument("agent_start", type=int)
+    train_p.add_argument("agent_end", type=int)
+    rt.add_arch_args(train_p)
+
+    args = parser.parse_args()
+    rt.configure(arch=rt.arch_from_args(args))
+
+    if args.command == "watch":
+        watch(args.connector_id, args.agent1_id, args.agent2_id)
+    else:
+        train_connectors(
+            args.connector_start,
+            args.connector_end,
+            args.agent_start,
+            args.agent_end,
+        )
 
 
 if __name__ == "__main__":

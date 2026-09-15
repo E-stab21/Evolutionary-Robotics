@@ -24,72 +24,78 @@ CONNECTOR_HIDDEN_LAYER_SIZE = 20
 
 
 # agent generation
-def generate_agents(num_of_agents, directory="agents"):
+def generate_one_agent(agent_id, directory="agents"):
     os.makedirs(directory, exist_ok=True)
-    for id in range(num_of_agents):
-        vertices = [(random.randint(0, MAX_X), random.randint(0, MAX_Y))]
-        edges = []
-        chosen = []
+    vertices = [(random.randint(0, MAX_X), random.randint(0, MAX_Y))]
+    edges = []
+    chosen = []
 
-        # vertex generation
-        for _ in range(NUM_OF_AGENT_VERTICES - 1):
-            check = True
-            while check:
-                possible = []
-                rand_index = random.randint(0, len(vertices) - 1)
-                x, y = vertices[rand_index]
-                for x_ in [-1, 1]:
-                    if not ((x + x_, y) in vertices or x + x_ > MAX_X or x + x_ < 0):
-                        possible.append((x + x_, y))
-                for y_ in [-1, 1]:
-                    if not ((x, y + y_) in vertices or y + y_ > MAX_Y or y + y_ < 0):
-                        possible.append((x, y + y_))
-                if possible:
-                    rand_vertex = random.choice(possible)
-                    edges.append([rand_index, len(vertices), 0])
-                    vertices.append(rand_vertex)
-                    check = False
+    for _ in range(NUM_OF_AGENT_VERTICES - 1):
+        check = True
+        while check:
+            possible = []
+            rand_index = random.randint(0, len(vertices) - 1)
+            x, y = vertices[rand_index]
+            for x_ in [-1, 1]:
+                if not ((x + x_, y) in vertices or x + x_ > MAX_X or x + x_ < 0):
+                    possible.append((x + x_, y))
+            for y_ in [-1, 1]:
+                if not ((x, y + y_) in vertices or y + y_ > MAX_Y or y + y_ < 0):
+                    possible.append((x, y + y_))
+            if possible:
+                rand_vertex = random.choice(possible)
+                edges.append([rand_index, len(vertices), 0])
+                vertices.append(rand_vertex)
+                check = False
 
-        # edge generation
-        for _ in range(NUM_OF_AGENT_EDGES - len(edges)):
-            check = True
-            while check:
-                rand_edge = [
-                    random.randint(0, len(vertices) - 1),
-                    random.randint(0, len(vertices) - 1),
-                    0,
-                ]
-                if rand_edge[0] != rand_edge[1] and rand_edge not in edges:
-                    edges.append(rand_edge)
-                    check = False
+    for _ in range(NUM_OF_AGENT_EDGES - len(edges)):
+        check = True
+        while check:
+            rand_edge = [
+                random.randint(0, len(vertices) - 1),
+                random.randint(0, len(vertices) - 1),
+                0,
+            ]
+            if rand_edge[0] != rand_edge[1] and rand_edge not in edges:
+                edges.append(rand_edge)
+                check = False
 
-        # choosing active or passive edges
-        for _ in range(NUM_OF_AGENT_ACTIVE_EDGES):
-            check = True
-            while check:
-                rand_index = random.randint(0, len(edges) - 1)
-                if rand_index not in chosen:
-                    chosen.append(rand_index)
-                    edges[rand_index][2] = 1
-                    check = False
+    for _ in range(NUM_OF_AGENT_ACTIVE_EDGES):
+        check = True
+        while check:
+            rand_index = random.randint(0, len(edges) - 1)
+            if rand_index not in chosen:
+                chosen.append(rand_index)
+                edges[rand_index][2] = 1
+                check = False
 
-        # brain generation
-        weights1 = np.random.rand(AGENT_HIDDEN_LAYER_SIZE, AGENT_INPUT_SIZE)
-        weights2 = np.random.rand(AGENT_HIDDEN_LAYER_SIZE, AGENT_HIDDEN_LAYER_SIZE)
-        weights3 = np.random.rand(NUM_OF_AGENT_ACTIVE_EDGES, AGENT_HIDDEN_LAYER_SIZE)
+    weights1 = np.random.rand(AGENT_HIDDEN_LAYER_SIZE, AGENT_INPUT_SIZE).astype(
+        np.float32
+    )
+    weights2 = np.random.rand(
+        AGENT_HIDDEN_LAYER_SIZE, AGENT_HIDDEN_LAYER_SIZE
+    ).astype(np.float32)
+    weights3 = np.random.rand(
+        NUM_OF_AGENT_ACTIVE_EDGES, AGENT_HIDDEN_LAYER_SIZE
+    ).astype(np.float32)
 
-        vertices = np.array(vertices)
+    path = f"{directory}/agent{agent_id}.npz"
+    np.savez(
+        path,
+        points=np.array(vertices),
+        springs=edges,
+        status="untrained",
+        fitness=0.0,
+        weights1=weights1,
+        weights2=weights2,
+        weights3=weights3,
+    )
+    return path
 
-        np.savez(
-            f"{directory}/agent{id}.npz",
-            points=vertices,
-            springs=edges,
-            status="untrained",
-            fitness=0.0,
-            weights1=weights1,
-            weights2=weights2,
-            weights3=weights3,
-        )
+
+def generate_agents(num_of_agents, directory="agents"):
+    for agent_id in range(num_of_agents):
+        generate_one_agent(agent_id, directory=directory)
 
 
 # Fixed grid-region targets for connector anchors (same areas on every agent).

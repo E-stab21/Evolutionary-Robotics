@@ -2,10 +2,10 @@
 Simulation constants and kernels
 """
 
-import os
 import secrets
 import numpy as np
 import taichi as ti
+import runtime as rt
 from generate import (
     NUM_OF_AGENT_VERTICES,
     NUM_OF_AGENT_EDGES,
@@ -20,11 +20,32 @@ from generate import (
 
 
 SEED = secrets.randbits(31)
-_ARCH = os.environ.get("META_ROBOTS_ARCH", "cpu").lower()
-_TI_ARCH = ti.cpu if _ARCH in ("cpu", "x64", "arm64") else ti.gpu
-ti.init(arch=_TI_ARCH, random_seed=464525965, debug=False, unrolling_limit=0)
 
-TIME_STEPS = int(os.environ.get("META_ROBOTS_TIME_STEPS", "1000"))
+
+def _init_taichi():
+    common = dict(random_seed=464525965, debug=False, unrolling_limit=0)
+    if rt.ARCH != "gpu":
+        ti.init(arch=ti.cpu, **common)
+        return "cpu"
+
+    # Prefer Vulkan here (Intel Arc). CUDA only works with proprietary NVIDIA.
+    errors = []
+    for arch_name, arch in (("vulkan", ti.vulkan), ("cuda", ti.cuda)):
+        try:
+            kw = dict(arch=arch, **common)
+            if arch_name == "cuda":
+                kw["device_memory_fraction"] = rt.GPU_MEMORY_FRACTION
+            ti.init(**kw)
+            return arch_name
+        except Exception as exc:
+            errors.append(f"{arch_name}: {exc}")
+    raise RuntimeError("No GPU backend available: " + " | ".join(errors))
+
+
+_GPU_BACKEND = _init_taichi()
+print(f"[runtime] taichi arch={rt.ARCH} backend={_GPU_BACKEND}", flush=True)
+
+TIME_STEPS = rt.TIME_STEPS
 DT = 0.005
 GRAVITY = ti.Vector([0, -9.8])
 SPRING_K = 1500.0
@@ -41,9 +62,12 @@ FRICTION_MU = 0.99
 SENSOR_SMOOTHING = 0.01
 CPG_FREQUENCY = 20.0
 
+# Paper-style actuation smoothing: o_t = α o_raw + (1-α) o_{t-1}
+MOTOR_SMOOTH = 0.15
 LR = 0.01
+LR_END = 0.001
 GRAD_CLIP = 10.0
-GENERATIONS = int(os.environ.get("META_ROBOTS_GENERATIONS", "30"))
+GENERATIONS = rt.GENERATIONS
 
 SCALE = 10.0
 
@@ -188,7 +212,13 @@ def compute_agent_motor_forces(
         sum = 0.0
         for j in ti.static(range(AGENT_HIDDEN_LAYER_SIZE)):
             sum += neural_state2[t, j] * weights3[i, j]
-        output_state[t, i] = ti.tanh(sum)
+        raw = ti.tanh(sum)
+        if t == 0:
+            output_state[t, i] = raw
+        else:
+            output_state[t, i] = (
+                MOTOR_SMOOTH * raw + (1.0 - MOTOR_SMOOTH) * output_state[t - 1, i]
+            )
 
     for i in range(NUM_OF_AGENT_ACTIVE_EDGES):
         a, b = edges[motor_indices[i]]
@@ -311,22 +341,34 @@ def compute_loss(
 
 @ti.kernel
 def update_agent_weights(
-    weights1: ti.template(), weights2: ti.template(), weights3: ti.template()
+    weights1: ti.template(),
+    weights2: ti.template(),
+    weights3: ti.template(),
+    lr: float,
 ):
     for i, j in weights1:
         grad = weights1.grad[i, j]
         grad = ti.max(ti.min(grad, GRAD_CLIP), -GRAD_CLIP)
-        weights1[i, j] -= grad * LR
+        weights1[i, j] -= grad * lr
 
     for i, j in weights2:
         grad = weights2.grad[i, j]
         grad = ti.max(ti.min(grad, GRAD_CLIP), -GRAD_CLIP)
-        weights2[i, j] -= grad * LR
+        weights2[i, j] -= grad * lr
 
     for i, j in weights3:
         grad = weights3.grad[i, j]
         grad = ti.max(ti.min(grad, GRAD_CLIP), -GRAD_CLIP)
-        weights3[i, j] -= grad * LR
+        weights3[i, j] -= grad * lr
+
+
+def agent_lr(gen, generations=None):
+    """Linear decay from LR -> LR_END over training."""
+    total = generations if generations is not None else GENERATIONS
+    if total <= 1:
+        return LR_END
+    frac = gen / (total - 1)
+    return LR + (LR_END - LR) * frac
 
 
 @ti.kernel
@@ -448,11 +490,21 @@ class Agent:
         self.anchors.from_numpy(self.anchors_np)
 
         j = 0
+        edges_np = np.zeros((NUM_OF_AGENT_EDGES, 2), dtype=np.int32)
+        motors_np = np.zeros(NUM_OF_AGENT_ACTIVE_EDGES, dtype=np.int32)
         for i, spring in enumerate(self.springs):
-            self.edges[i] = ti.Vector([spring[0], spring[1]])
-            if spring[2] == 1:
-                self.motor_indices[j] = i
+            edges_np[i, 0] = int(spring[0])
+            edges_np[i, 1] = int(spring[1])
+            if int(spring[2]) == 1:
+                motors_np[j] = i
                 j += 1
+        if j != NUM_OF_AGENT_ACTIVE_EDGES:
+            raise ValueError(
+                f"expected {NUM_OF_AGENT_ACTIVE_EDGES} active springs, got {j}"
+            )
+        self.edges_np = edges_np
+        self.edges.from_numpy(edges_np)
+        self.motor_indices.from_numpy(motors_np)
 
         initial_points = []
         for x, y in self.points:
@@ -465,15 +517,19 @@ class Agent:
         min_y = min(y for _, y in initial_points)
 
         self.initial_pose = ti.Vector.field(n=2, dtype=float, shape=(NUM_OF_AGENT_VERTICES,))
+        pose_np = np.zeros((NUM_OF_AGENT_VERTICES, 2), dtype=np.float32)
         for i, (x, y) in enumerate(initial_points):
-            pose = (x - min_x + START_MARGIN, y - min_y + START_MARGIN)
-            self.initial_pose[i] = pose
-            self.vertices[0, i] = pose
+            pose_np[i] = (x - min_x + START_MARGIN, y - min_y + START_MARGIN)
+        self.initial_pose.from_numpy(pose_np)
+        self.vertices.from_numpy(
+            np.repeat(pose_np[None, :, :], TIME_STEPS, axis=0)
+        )
 
+        rests = np.zeros(NUM_OF_AGENT_EDGES, dtype=np.float32)
         for i in range(NUM_OF_AGENT_EDGES):
-            a, b = self.edges[i]
-            diff = self.vertices[0, a] - self.vertices[0, b]
-            self.resting_lengths[i] = diff.norm()
+            a, b = int(edges_np[i, 0]), int(edges_np[i, 1])
+            rests[i] = float(np.linalg.norm(pose_np[a] - pose_np[b]))
+        self.resting_lengths.from_numpy(rests)
 
     def write(self, fitness=None):
         if fitness is not None:
