@@ -1,0 +1,4 @@
+{
+  "name": "Evolutionary Robotics",
+  "install": "sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-dev && pip install --break-system-packages -r requirements.txt"
+}
