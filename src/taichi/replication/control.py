@@ -2,7 +2,7 @@
 Main experiment control file.
 
 Default is a cool CPU light run. For the full paper-scale job:
-  python control.py --full --gpu --pause 0.75
+  python control.py --full --gpu
 """
 
 import argparse
@@ -65,10 +65,10 @@ def _configure_runtime(args):
     if args.max_attempts is not None:
         max_attempts = args.max_attempts
 
-    pause = rt.configure_from_args(args)
+    rt.configure_from_args(args)
     # configure_from_args already set arch; ensure gens/steps match resolved values
     rt.configure(generations=generations, time_steps=time_steps)
-    return pool, selected, per_set, samples, min_fitness, max_attempts, pause
+    return pool, selected, per_set, samples, min_fitness, max_attempts
 
 
 def _clear_npz(directory, prefix):
@@ -87,7 +87,6 @@ def main():
         samples,
         min_fitness,
         max_attempts,
-        pause,
     ) = _configure_runtime(args)
 
     import generate
@@ -101,7 +100,7 @@ def main():
     print(
         f"arch={rt.ARCH} gens={sim.GENERATIONS} steps={sim.TIME_STEPS} "
         f"pool={pool} selected={selected} connectors={connectors} samples={samples} "
-        f"min_fitness={min_fitness} max_attempts={max_attempts} pause={pause}",
+        f"min_fitness={min_fitness} max_attempts={max_attempts}",
         flush=True,
     )
 
@@ -112,7 +111,6 @@ def main():
         directory="agents_pool",
         min_fitness=min_fitness,
         max_attempts=max_attempts,
-        pause=pause,
     )
 
     print(f"Selecting {selected} agents with approx-normal fitness", flush=True)

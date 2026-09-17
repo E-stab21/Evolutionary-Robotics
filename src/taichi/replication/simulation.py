@@ -28,9 +28,9 @@ def _init_taichi():
         ti.init(arch=ti.cpu, **common)
         return "cpu"
 
-    # Prefer Vulkan here (Intel Arc). CUDA only works with proprietary NVIDIA.
+    # Prefer CUDA for NVIDIA dGPU, fallback to Vulkan
     errors = []
-    for arch_name, arch in (("vulkan", ti.vulkan), ("cuda", ti.cuda)):
+    for arch_name, arch in (("cuda", ti.cuda), ("vulkan", ti.vulkan)):
         try:
             kw = dict(arch=arch, **common)
             if arch_name == "cuda":

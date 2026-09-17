@@ -115,8 +115,7 @@ def watch(agent_id, directory="agents", fps=60):
             time.sleep(leftover)
 
 
-def train_one_agent(agent_id, directory="agents", pause=0.0, log_every=10):
-    import time
+def train_one_agent(agent_id, directory="agents", log_every=10):
     import numpy as np
     import taichi as ti
     import simulation as sim
@@ -126,7 +125,6 @@ def train_one_agent(agent_id, directory="agents", pause=0.0, log_every=10):
     best_weights = None
 
     for gen in range(sim.GENERATIONS):
-        started = time.perf_counter()
         sim.set_agent(agent)
         with ti.ad.Tape(loss=agent.loss):
             simulate(agent)
@@ -155,10 +153,6 @@ def train_one_agent(agent_id, directory="agents", pause=0.0, log_every=10):
                     agent.weights3.to_numpy().copy(),
                 )
 
-        if pause > 0:
-            work = time.perf_counter() - started
-            time.sleep(max(pause, work * 0.5))
-
     if best_weights is not None:
         agent.weights1.from_numpy(best_weights[0].astype(np.float32))
         agent.weights2.from_numpy(best_weights[1].astype(np.float32))
@@ -173,7 +167,7 @@ def train_one_agent(agent_id, directory="agents", pause=0.0, log_every=10):
     return fitness
 
 
-def train_agents(agent_start, agent_end, directory="agents", pause=0.0):
+def train_agents(agent_start, agent_end, directory="agents"):
     import simulation as sim
     import environments as envs
 
@@ -181,11 +175,11 @@ def train_agents(agent_start, agent_end, directory="agents", pause=0.0):
     envs.set_env("flat")
     print(
         f"training agents {agent_start}-{agent_end}: "
-        f"gens={sim.GENERATIONS} steps={sim.TIME_STEPS} pause={pause}s",
+        f"gens={sim.GENERATIONS} steps={sim.TIME_STEPS}",
         flush=True,
     )
     for agent_id in range(agent_start, agent_end + 1):
-        fitness = train_one_agent(agent_id, directory=directory, pause=pause)
+        fitness = train_one_agent(agent_id, directory=directory)
         print(f"agent{agent_id} final fitness={fitness:.4f}", flush=True)
 
 
@@ -194,7 +188,6 @@ def build_quality_pool(
     directory="agents_pool",
     min_fitness=1.0,
     max_attempts=8,
-    pause=0.0,
 ):
     """Generate+train agents, resampling morphologies that stay below min_fitness."""
     import shutil
@@ -206,7 +199,7 @@ def build_quality_pool(
     envs.set_env("flat")
     print(
         f"quality pool n={count} min_fitness={min_fitness} "
-        f"max_attempts={max_attempts} gens={sim.GENERATIONS} pause={pause}s",
+        f"max_attempts={max_attempts} gens={sim.GENERATIONS}",
         flush=True,
     )
 
@@ -224,7 +217,7 @@ def build_quality_pool(
                 f"agent{agent_id} attempt {attempt}/{max_attempts}",
                 flush=True,
             )
-            fitness = train_one_agent(agent_id, directory=directory, pause=pause)
+            fitness = train_one_agent(agent_id, directory=directory)
             if fitness > best_fitness:
                 best_fitness = fitness
                 shutil.copy2(final_path, best_path)
@@ -289,7 +282,7 @@ def main():
     rt.add_train_args(pool_p)
 
     args = parser.parse_args()
-    pause = rt.configure_from_args(args)
+    rt.configure_from_args(args)
 
     if args.command == "watch":
         watch(args.agent_id, directory=args.directory)
@@ -298,7 +291,6 @@ def main():
             args.agent_start,
             args.agent_end,
             directory=args.directory,
-            pause=pause,
         )
     else:
         build_quality_pool(
@@ -306,7 +298,6 @@ def main():
             directory=args.directory,
             min_fitness=args.min_fitness,
             max_attempts=args.max_attempts,
-            pause=pause,
         )
 
 
