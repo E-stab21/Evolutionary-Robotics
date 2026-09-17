@@ -97,10 +97,11 @@ def main():
     import simulation as sim
 
     connectors = per_set * 4
+    gpu_power_str = f" gpu_power={rt.GPU_POWER_LIMIT}W" if rt.GPU_POWER_LIMIT else ""
     print(
         f"arch={rt.ARCH} gens={sim.GENERATIONS} steps={sim.TIME_STEPS} "
         f"pool={pool} selected={selected} connectors={connectors} samples={samples} "
-        f"min_fitness={min_fitness} max_attempts={max_attempts}",
+        f"min_fitness={min_fitness} max_attempts={max_attempts}{gpu_power_str}",
         flush=True,
     )
 
