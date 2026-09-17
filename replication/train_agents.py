@@ -77,7 +77,7 @@ def simulate(agent, with_display=False, video_manager=None, gui=None):
 def save_video(agent, with_display=False):
     import taichi as ti
 
-    video_output_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "vids")
+    video_output_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "class", "vids")
     video_manager = ti.tools.VideoManager(
         output_dir=video_output_dir,
         framerate=60,

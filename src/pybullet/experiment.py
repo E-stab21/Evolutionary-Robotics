@@ -4,6 +4,8 @@ Experiment for the CS3060 project.
 import os
 import glob
 import matplotlib.pyplot as plt
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../class"))
 from pyrosim import pyrosim
 from src.classes.design import Ctrnn, TrdNet
 import constants as c
