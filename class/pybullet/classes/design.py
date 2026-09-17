@@ -4,7 +4,7 @@ import random
 import numpy as np
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../class"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 from pyrosim import pyrosim
 
 
