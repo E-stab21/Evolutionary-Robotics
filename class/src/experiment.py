@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from pyrosim import pyrosim
-from pybullet.classes.design import Ctrnn, TrdNet
+from src.classes.design import Ctrnn, TrdNet
 import constants as c
 
 def create_world():
