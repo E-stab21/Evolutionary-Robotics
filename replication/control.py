@@ -65,13 +65,14 @@ def _configure_runtime(args):
     if args.max_attempts is not None:
         max_attempts = args.max_attempts
 
-    rt.configure_from_args(args)
+    pause = rt.configure_from_args(args)
     # configure_from_args already set arch; ensure gens/steps match resolved values
     rt.configure(generations=generations, time_steps=time_steps)
-    return pool, selected, per_set, samples, min_fitness, max_attempts
+    return pool, selected, per_set, samples, min_fitness, max_attempts, pause
 
 
 def _clear_npz(directory, prefix):
+    directory = rt.resolve_path(directory)
     os.makedirs(directory, exist_ok=True)
     for name in os.listdir(directory):
         if name.startswith(prefix) and name.endswith(".npz"):
@@ -87,6 +88,7 @@ def main():
         samples,
         min_fitness,
         max_attempts,
+        pause,
     ) = _configure_runtime(args)
 
     import generate
@@ -97,11 +99,10 @@ def main():
     import simulation as sim
 
     connectors = per_set * 4
-    gpu_power_str = f" gpu_power={rt.GPU_POWER_LIMIT}W" if rt.GPU_POWER_LIMIT else ""
     print(
         f"arch={rt.ARCH} gens={sim.GENERATIONS} steps={sim.TIME_STEPS} "
         f"pool={pool} selected={selected} connectors={connectors} samples={samples} "
-        f"min_fitness={min_fitness} max_attempts={max_attempts}{gpu_power_str}",
+        f"min_fitness={min_fitness} max_attempts={max_attempts} pause={pause}",
         flush=True,
     )
 
@@ -112,6 +113,7 @@ def main():
         directory="agents_pool",
         min_fitness=min_fitness,
         max_attempts=max_attempts,
+        pause=pause,
     )
 
     print(f"Selecting {selected} agents with approx-normal fitness", flush=True)

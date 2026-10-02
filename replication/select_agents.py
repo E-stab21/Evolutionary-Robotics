@@ -5,6 +5,7 @@ Subsample trained agents to an approximate normal fitness distribution.
 import os
 import shutil
 import numpy as np
+import runtime as rt
 
 
 POOL_DIR = "agents_pool"
@@ -28,6 +29,7 @@ def erfinv(y):
 
 
 def load_pool_fitnesses(pool_dir=POOL_DIR):
+    pool_dir = rt.resolve_path(pool_dir)
     rows = []
     for name in sorted(os.listdir(pool_dir)):
         if not name.startswith("agent") or not name.endswith(".npz"):
@@ -42,6 +44,7 @@ def load_pool_fitnesses(pool_dir=POOL_DIR):
 
 
 def select_normal(pool_dir=POOL_DIR, selected_dir=SELECTED_DIR, n=NUM_SELECTED):
+    selected_dir = rt.resolve_path(selected_dir)
     rows = load_pool_fitnesses(pool_dir)
     if len(rows) < n:
         raise ValueError(f"Need at least {n} trained agents, found {len(rows)}")

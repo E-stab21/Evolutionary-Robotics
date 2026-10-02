@@ -8,6 +8,7 @@ import random
 import numpy as np
 import simulation as sim
 import environments as envs
+import runtime as rt
 import train_agents
 import train_connectors
 
@@ -25,9 +26,10 @@ COLLECTIVE_TYPES = [
 
 
 def list_connectors(strength, train_pairing, max_id=200):
+    connectors_dir = rt.resolve_path("connectors")
     ids = []
     for connector_id in range(max_id):
-        path = f"connectors/connector{connector_id}.npz"
+        path = f"{connectors_dir}/connector{connector_id}.npz"
         if not os.path.exists(path):
             continue
         with np.load(path) as loaded:
@@ -82,6 +84,7 @@ def eval_collective(strength, train_pairing, deploy_pairing, agent_ids, env_name
 
 
 def run_deployment(agent_start=0, agent_end=99, samples=20, out_path="results.csv"):
+    out_path = rt.resolve_path(out_path)
     agent_ids = list(range(agent_start, agent_end + 1))
     rows = []
 

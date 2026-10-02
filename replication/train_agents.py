@@ -74,6 +74,25 @@ def simulate(agent, with_display=False, video_manager=None, gui=None):
             display(agent, t, video_manager, gui=gui)
 
 
+def simulate_passive(agent, steps):
+    """Physics only -- no motor/NN forces at all, regardless of weights.
+    Tests pure structural integrity (springs + gravity + ground contact) of
+    the body, independent of whatever motor policy it has learned."""
+    import simulation as sim
+
+    for t in range(steps):
+        sim.compute_spring_forces(
+            t,
+            agent.vertices,
+            agent.edges,
+            agent.velocities,
+            agent.forces,
+            agent.resting_lengths,
+        )
+        sim.compute_ground_forces(t, agent.vertices, agent.velocities, agent.forces)
+        sim.apply_forces(t, agent.vertices, agent.velocities, agent.forces)
+
+
 def save_video(agent, with_display=False):
     import taichi as ti
 
@@ -116,7 +135,29 @@ def watch(agent_id, directory="agents", fps=60):
             time.sleep(leftover)
 
 
-def train_one_agent(agent_id, directory="agents", log_every=10):
+def body_survives(agent_id, directory="agents", check_step=500, max_displacement=0.12):
+    """
+    Cheap pre-training filter: simulate the body with motor forces entirely
+    turned off (pure structural physics: springs + gravity + ground contact)
+    and check how far it's moved from its starting layout by `check_step`.
+    This tests the body's structural integrity independent of whatever motor
+    policy it has (or hasn't) learned -- works the same whether the weights
+    are fresh or already trained -- so reject/resample before spending ~80
+    generations of training on a body that can't hold itself together.
+    """
+    import numpy as np
+    import simulation as sim
+
+    agent = sim.Agent(agent_id, directory=directory)
+    sim.set_agent(agent)
+    simulate_passive(agent, check_step + 1)
+    verts = agent.vertices.to_numpy()
+    per_vertex_displacement = np.linalg.norm(verts[check_step] - verts[0], axis=-1)
+    return float(per_vertex_displacement.mean()) <= max_displacement
+
+
+def train_one_agent(agent_id, directory="agents", pause=0.0, log_every=10, history=None):
+    import time
     import numpy as np
     import taichi as ti
     import simulation as sim
@@ -126,6 +167,7 @@ def train_one_agent(agent_id, directory="agents", log_every=10):
     best_weights = None
 
     for gen in range(sim.GENERATIONS):
+        started = time.perf_counter()
         sim.set_agent(agent)
         with ti.ad.Tape(loss=agent.loss):
             simulate(agent)
@@ -146,6 +188,8 @@ def train_one_agent(agent_id, directory="agents", log_every=10):
                 f"agent{agent_id} gen {gen + 1}/{sim.GENERATIONS} fitness={fit:.4f}",
                 flush=True,
             )
+            if history is not None:
+                history.append(fit)
             if fit > best_fitness:
                 best_fitness = fit
                 best_weights = (
@@ -153,6 +197,10 @@ def train_one_agent(agent_id, directory="agents", log_every=10):
                     agent.weights2.to_numpy().copy(),
                     agent.weights3.to_numpy().copy(),
                 )
+
+        if pause > 0:
+            work = time.perf_counter() - started
+            time.sleep(max(pause, work * 0.5))
 
     if best_weights is not None:
         agent.weights1.from_numpy(best_weights[0].astype(np.float32))
@@ -168,19 +216,21 @@ def train_one_agent(agent_id, directory="agents", log_every=10):
     return fitness
 
 
-def train_agents(agent_start, agent_end, directory="agents"):
+def train_agents(agent_start, agent_end, directory="agents", pause=0.0):
     import simulation as sim
     import environments as envs
+    import runtime as rt
 
+    directory = rt.resolve_path(directory)
     os.makedirs(directory, exist_ok=True)
     envs.set_env("flat")
     print(
         f"training agents {agent_start}-{agent_end}: "
-        f"gens={sim.GENERATIONS} steps={sim.TIME_STEPS}",
+        f"gens={sim.GENERATIONS} steps={sim.TIME_STEPS} pause={pause}s",
         flush=True,
     )
     for agent_id in range(agent_start, agent_end + 1):
-        fitness = train_one_agent(agent_id, directory=directory)
+        fitness = train_one_agent(agent_id, directory=directory, pause=pause)
         print(f"agent{agent_id} final fitness={fitness:.4f}", flush=True)
 
 
@@ -189,24 +239,36 @@ def build_quality_pool(
     directory="agents_pool",
     min_fitness=1.0,
     max_attempts=8,
+    pause=0.0,
+    agent_ids=None,
 ):
-    """Generate+train agents, resampling morphologies that stay below min_fitness."""
+    """Generate+train agents, resampling morphologies that stay below min_fitness.
+
+    By default rebuilds slots 0..count-1; pass `agent_ids` to rebuild only a
+    specific subset (e.g. slots that predate a generation-logic change),
+    leaving the rest of the pool untouched.
+    """
     import shutil
     import environments as envs
     import generate
     import simulation as sim
+    import runtime as rt
 
+    directory = rt.resolve_path(directory)
     os.makedirs(directory, exist_ok=True)
     envs.set_env("flat")
+    if agent_ids is None:
+        agent_ids = range(count)
     print(
         f"quality pool n={count} min_fitness={min_fitness} "
-        f"max_attempts={max_attempts} gens={sim.GENERATIONS}",
+        f"max_attempts={max_attempts} gens={sim.GENERATIONS} pause={pause}s "
+        f"agent_ids={list(agent_ids)}",
         flush=True,
     )
 
     accepted = 0
     total_attempts = 0
-    for agent_id in range(count):
+    for agent_id in agent_ids:
         best_fitness = float("-inf")
         best_path = f"{directory}/agent{agent_id}.best.npz"
         final_path = f"{directory}/agent{agent_id}.npz"
@@ -218,7 +280,14 @@ def build_quality_pool(
                 f"agent{agent_id} attempt {attempt}/{max_attempts}",
                 flush=True,
             )
-            fitness = train_one_agent(agent_id, directory=directory)
+            if not body_survives(agent_id, directory=directory):
+                print(
+                    f"agent{agent_id} attempt {attempt} falls immediately -- "
+                    f"skipping training, resampling body",
+                    flush=True,
+                )
+                continue
+            fitness = train_one_agent(agent_id, directory=directory, pause=pause)
             if fitness > best_fitness:
                 best_fitness = fitness
                 shutil.copy2(final_path, best_path)
@@ -235,7 +304,13 @@ def build_quality_pool(
                 flush=True,
             )
         else:
-            shutil.copy2(best_path, final_path)
+            if best_fitness == float("-inf"):
+                # every attempt fell immediately (extremely unlikely with a
+                # reasonable max_attempts) -- train the last body anyway so
+                # this slot isn't left empty.
+                best_fitness = train_one_agent(agent_id, directory=directory, pause=pause)
+            else:
+                shutil.copy2(best_path, final_path)
             print(
                 f"agent{agent_id} KEEP-BEST fitness={best_fitness:.4f} "
                 f"(no attempt cleared {min_fitness})",
@@ -270,6 +345,7 @@ def main():
     train_p.add_argument("--directory", default="agents")
     rt.add_arch_args(train_p)
     rt.add_train_args(train_p)
+    rt.add_physics_args(train_p)
 
     pool_p = sub.add_parser(
         "build-pool",
@@ -281,9 +357,10 @@ def main():
     pool_p.add_argument("--max-attempts", type=int, default=8)
     rt.add_arch_args(pool_p)
     rt.add_train_args(pool_p)
+    rt.add_physics_args(pool_p)
 
     args = parser.parse_args()
-    rt.configure_from_args(args)
+    pause = rt.configure_from_args(args)
 
     if args.command == "watch":
         watch(args.agent_id, directory=args.directory)
@@ -292,12 +369,14 @@ def main():
             args.agent_start,
             args.agent_end,
             directory=args.directory,
+            pause=pause,
         )
     else:
         build_quality_pool(
             args.count,
             directory=args.directory,
             min_fitness=args.min_fitness,
+            pause=pause,
             max_attempts=args.max_attempts,
         )
 

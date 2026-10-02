@@ -6,11 +6,15 @@ Script that generates agent's and connector's
 import os
 import random
 import numpy as np
+import runtime as rt
 
 
 # globals
-MAX_X = 6
-MAX_Y = 4
+MAX_X = 6  # 7 columns
+MAX_Y = 3  # 4 rows -- matches the paper's "4 rows x 7 columns" grid exactly.
+# MAX_Y=4 (5 rows) let bodies come out taller than wide by pure random-walk
+# luck (~41% of a sample pool) -- those consistently jumped/toppled, since a
+# tall, narrow structure is far less stable than a short, wide one.
 
 NUM_OF_AGENT_VERTICES = 11
 NUM_OF_AGENT_EDGES = 21
@@ -19,16 +23,40 @@ AGENT_INPUT_SIZE = 54
 AGENT_HIDDEN_LAYER_SIZE = 32
 
 NUM_OF_CONNECTOR_EDGES = 5
-CONNECTOR_INPUT_SIZE = 12
-CONNECTOR_HIDDEN_LAYER_SIZE = 20
+CONNECTOR_INPUT_SIZE = 11  # per-spring: 4 relative positions + 4 velocities + 2 touch + 1 length
+CONNECTOR_HIDDEN_LAYER_SIZE = 32
 
 
-# agent generation
-def generate_one_agent(agent_id, directory="agents"):
-    os.makedirs(directory, exist_ok=True)
+def _init_weights(shape, fan_in):
+    """Zero-mean, fan-in-scaled uniform init so tanh layers don't saturate at birth."""
+    bound = 1.0 / np.sqrt(fan_in)
+    return np.random.uniform(-bound, bound, size=shape).astype(np.float32)
+
+
+MAX_LAYOUT_ATTEMPTS = 500
+
+
+def _neighbor_pairs(vertices):
+    """Index pairs whose grid points are adjacent, including diagonals -- the
+    only edges a real leg/segment should have, and enough to triangulate a
+    square cell so it can't just shear."""
+    pairs = []
+    for i in range(len(vertices)):
+        xi, yi = vertices[i]
+        for j in range(i + 1, len(vertices)):
+            xj, yj = vertices[j]
+            if max(abs(xi - xj), abs(yi - yj)) == 1:
+                pairs.append((i, j))
+    return pairs
+
+
+def _generate_layout():
+    """A connected random-walk body plus every local edge needed to fill out
+    NUM_OF_AGENT_EDGES, all between grid-adjacent nodes -- no springs
+    shortcutting across the body. Returns None if this layout is too sparse
+    to have enough local edges."""
     vertices = [(random.randint(0, MAX_X), random.randint(0, MAX_Y))]
     edges = []
-    chosen = []
 
     for _ in range(NUM_OF_AGENT_VERTICES - 1):
         check = True
@@ -48,17 +76,34 @@ def generate_one_agent(agent_id, directory="agents"):
                 vertices.append(rand_vertex)
                 check = False
 
-    for _ in range(NUM_OF_AGENT_EDGES - len(edges)):
-        check = True
-        while check:
-            rand_edge = [
-                random.randint(0, len(vertices) - 1),
-                random.randint(0, len(vertices) - 1),
-                0,
-            ]
-            if rand_edge[0] != rand_edge[1] and rand_edge not in edges:
-                edges.append(rand_edge)
-                check = False
+    existing = {(a, b) if a < b else (b, a) for a, b, _ in edges}
+    candidates = [pair for pair in _neighbor_pairs(vertices) if pair not in existing]
+    needed = NUM_OF_AGENT_EDGES - len(edges)
+    if len(candidates) < needed:
+        return None
+
+    random.shuffle(candidates)
+    for i, j in candidates[:needed]:
+        edges.append([i, j, 0])
+    return vertices, edges
+
+
+# agent generation
+def generate_one_agent(agent_id, directory="agents"):
+    directory = rt.resolve_path(directory)
+    os.makedirs(directory, exist_ok=True)
+    chosen = []
+
+    for _ in range(MAX_LAYOUT_ATTEMPTS):
+        layout = _generate_layout()
+        if layout is not None:
+            break
+    else:
+        raise RuntimeError(
+            f"Could not lay out a locally-connected {NUM_OF_AGENT_VERTICES}-node, "
+            f"{NUM_OF_AGENT_EDGES}-edge body after {MAX_LAYOUT_ATTEMPTS} attempts"
+        )
+    vertices, edges = layout
 
     for _ in range(NUM_OF_AGENT_ACTIVE_EDGES):
         check = True
@@ -69,15 +114,15 @@ def generate_one_agent(agent_id, directory="agents"):
                 edges[rand_index][2] = 1
                 check = False
 
-    weights1 = np.random.rand(AGENT_HIDDEN_LAYER_SIZE, AGENT_INPUT_SIZE).astype(
-        np.float32
+    weights1 = _init_weights(
+        (AGENT_HIDDEN_LAYER_SIZE, AGENT_INPUT_SIZE), AGENT_INPUT_SIZE
     )
-    weights2 = np.random.rand(
-        AGENT_HIDDEN_LAYER_SIZE, AGENT_HIDDEN_LAYER_SIZE
-    ).astype(np.float32)
-    weights3 = np.random.rand(
-        NUM_OF_AGENT_ACTIVE_EDGES, AGENT_HIDDEN_LAYER_SIZE
-    ).astype(np.float32)
+    weights2 = _init_weights(
+        (AGENT_HIDDEN_LAYER_SIZE, AGENT_HIDDEN_LAYER_SIZE), AGENT_HIDDEN_LAYER_SIZE
+    )
+    weights3 = _init_weights(
+        (NUM_OF_AGENT_ACTIVE_EDGES, AGENT_HIDDEN_LAYER_SIZE), AGENT_HIDDEN_LAYER_SIZE
+    )
 
     path = f"{directory}/agent{agent_id}.npz"
     np.savez(
@@ -118,16 +163,23 @@ def region_anchors(points):
 
 # connector generation
 def generate_connectors(num_per_set=10, directory="connectors"):
+    directory = rt.resolve_path(directory)
     os.makedirs(directory, exist_ok=True)
     connector_id = 0
     for strength in ("weak", "strong"):
         for pairing in ("uniform", "diverse"):
             for _ in range(num_per_set):
-                weights1 = np.random.rand(
-                    CONNECTOR_HIDDEN_LAYER_SIZE, CONNECTOR_INPUT_SIZE
+                weights1 = _init_weights(
+                    (CONNECTOR_HIDDEN_LAYER_SIZE, CONNECTOR_INPUT_SIZE),
+                    CONNECTOR_INPUT_SIZE,
                 )
-                weights2 = np.random.rand(
-                    NUM_OF_CONNECTOR_EDGES, CONNECTOR_HIDDEN_LAYER_SIZE
+                weights2 = _init_weights(
+                    (CONNECTOR_HIDDEN_LAYER_SIZE, CONNECTOR_HIDDEN_LAYER_SIZE),
+                    CONNECTOR_HIDDEN_LAYER_SIZE,
+                )
+                weights3 = _init_weights(
+                    (1, CONNECTOR_HIDDEN_LAYER_SIZE),
+                    CONNECTOR_HIDDEN_LAYER_SIZE,
                 )
                 np.savez(
                     f"{directory}/connector{connector_id}.npz",
@@ -135,6 +187,7 @@ def generate_connectors(num_per_set=10, directory="connectors"):
                     strength=strength,
                     weights1=weights1,
                     weights2=weights2,
+                    weights3=weights3,
                 )
                 connector_id += 1
     return connector_id

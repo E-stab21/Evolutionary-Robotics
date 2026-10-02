@@ -5,6 +5,7 @@ Connector training and simulation
 import argparse
 import random
 import numpy as np
+import runtime as rt
 
 
 def place_pair(agent1, agent2, offset=3.0):
@@ -128,15 +129,17 @@ def simulate(connector, with_display=False, video_manager=None, gui=None):
             agent1.velocities,
             agent2.vertices,
             agent2.velocities,
+            agent1.anchors,
+            agent2.anchors,
             connector.agent1_center,
             connector.agent2_center,
-            connector.agent1_avg_velocity,
-            connector.agent2_avg_velocity,
             connector.input_state,
-            connector.hidden_state,
+            connector.hidden1_state,
+            connector.hidden2_state,
             connector.output_state,
             connector.weights1,
             connector.weights2,
+            connector.weights3,
         )
         sim.apply_connector_forces(
             t,
@@ -160,12 +163,23 @@ def simulate(connector, with_display=False, video_manager=None, gui=None):
             display(connector, t, video_manager, gui=gui)
 
 
-def watch(connector_id, agent1_id, agent2_id):
+def watch(
+    connector_id,
+    agent1_id,
+    agent2_id,
+    connectors_directory="connectors",
+    agents_directory="agents",
+):
     import taichi as ti
     import simulation as sim
     import environments as envs
 
-    connector = sim.Connector(connector_id, sim.Agent(agent1_id), sim.Agent(agent2_id))
+    connector = sim.Connector(
+        connector_id,
+        sim.Agent(agent1_id, directory=agents_directory),
+        sim.Agent(agent2_id, directory=agents_directory),
+        directory=connectors_directory,
+    )
     sim.set_agent(connector.agent1)
     sim.set_agent(connector.agent2)
     place_pair(connector.agent1, connector.agent2)
@@ -175,8 +189,9 @@ def watch(connector_id, agent1_id, agent2_id):
     simulate(connector, with_display=True, gui=gui)
 
 
-def load_connector_meta(connector_id):
-    with np.load(f"connectors/connector{connector_id}.npz") as loaded:
+def load_connector_meta(connector_id, directory="connectors"):
+    path = f"{rt.resolve_path(directory)}/connector{connector_id}.npz"
+    with np.load(path) as loaded:
         return loaded["connector_type"].item(), loaded["strength"].item()
 
 
@@ -189,7 +204,14 @@ def choose_partner_id(agent_id, agent_ids, pairing):
     return random.choice(candidates)
 
 
-def train_connectors(connector_start, connector_end, agent_start, agent_end):
+def train_connectors(
+    connector_start,
+    connector_end,
+    agent_start,
+    agent_end,
+    connectors_directory="connectors",
+    agents_directory="agents",
+):
     import taichi as ti
     import simulation as sim
     import environments as envs
@@ -198,28 +220,36 @@ def train_connectors(connector_start, connector_end, agent_start, agent_end):
     envs.set_env("flat")
 
     for connector_id in range(connector_start, connector_end + 1):
-        pairing, strength = load_connector_meta(connector_id)
+        pairing, strength = load_connector_meta(connector_id, directory=connectors_directory)
         print(f"training connector{connector_id} ({strength}/{pairing})", flush=True)
 
         for agent_id in agent_ids:
             partner_id = choose_partner_id(agent_id, agent_ids, pairing)
             connector = sim.Connector(
-                connector_id, sim.Agent(agent_id), sim.Agent(partner_id)
+                connector_id,
+                sim.Agent(agent_id, directory=agents_directory),
+                sim.Agent(partner_id, directory=agents_directory),
+                directory=connectors_directory,
             )
 
-            for _ in range(sim.GENERATIONS):
+            for gen in range(sim.GENERATIONS):
                 sim.set_agent(connector.agent1)
                 sim.set_agent(connector.agent2)
                 place_pair(connector.agent1, connector.agent2)
                 refresh_rest_lengths(connector)
                 with ti.ad.Tape(loss=connector.agent1.loss):
                     simulate(connector)
-                    sim.compute_loss(
+                    sim.compute_connector_loss(
                         connector.agent1.vertices,
                         connector.agent2.vertices,
+                        connector.output_state,
+                        connector.output_sum,
+                        connector.output_sumsq,
                         connector.agent1.loss,
                     )
-                sim.update_connector_weights(connector.weights1, connector.weights2)
+                sim.update_connector_weights(
+                    connector.weights1, connector.weights2, connector.weights3, sim.agent_lr(gen)
+                )
 
             connector.write()
 
@@ -234,6 +264,8 @@ def main():
     watch_p.add_argument("connector_id", type=int)
     watch_p.add_argument("agent1_id", type=int)
     watch_p.add_argument("agent2_id", type=int)
+    watch_p.add_argument("--connectors-directory", default="connectors")
+    watch_p.add_argument("--agents-directory", default="agents")
     rt.add_arch_args(watch_p)
 
     train_p = sub.add_parser("train", help="Train a range of connectors")
@@ -241,19 +273,29 @@ def main():
     train_p.add_argument("connector_end", type=int)
     train_p.add_argument("agent_start", type=int)
     train_p.add_argument("agent_end", type=int)
+    train_p.add_argument("--connectors-directory", default="connectors")
+    train_p.add_argument("--agents-directory", default="agents")
     rt.add_arch_args(train_p)
 
     args = parser.parse_args()
     rt.configure(arch=rt.arch_from_args(args))
 
     if args.command == "watch":
-        watch(args.connector_id, args.agent1_id, args.agent2_id)
+        watch(
+            args.connector_id,
+            args.agent1_id,
+            args.agent2_id,
+            connectors_directory=args.connectors_directory,
+            agents_directory=args.agents_directory,
+        )
     else:
         train_connectors(
             args.connector_start,
             args.connector_end,
             args.agent_start,
             args.agent_end,
+            connectors_directory=args.connectors_directory,
+            agents_directory=args.agents_directory,
         )
 
 
